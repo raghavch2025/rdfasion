@@ -49,11 +49,11 @@ Checks: `npm test` (MOQ, totals, Indian number format, WhatsApp message format),
 
 The database sets itself up: `npm run build` first runs `scripts/migrate.mjs`, which applies `supabase/migrations/*.sql` (and `supabase/seed.sql` the first time) straight to Postgres. So a Vercel deploy needs no SQL editor.
 
-1. **Supabase**: create a project in the Mumbai (`ap-south-1`) region.
-2. **Vercel**: Add New → Project → import `raghavch2025/rdfasion`. Then either:
-   - **Easiest:** in the Vercel project open **Storage → Connect Database → Supabase** and pick the project. That sets `POSTGRES_URL_NON_POOLING`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` for you. Or:
-   - **By hand:** add `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (Supabase → Project Settings → API keys) and `DATABASE_URL` (Supabase → **Connect** → **Session pooler** connection string, with your database password filled in).
-3. **Deploy.** The build log shows `[migrate] ... database is up to date`, and Vercel shows the live link.
+1. **Vercel**: Add New → Project → import `raghavch2025/rdfasion` → Deploy. This first deploy has no database yet; that's expected.
+2. **Database**, pick one:
+   - **From Vercel (easiest):** in the Vercel project, **Storage → Create Database → Supabase**, choose region **Mumbai (ap-south-1)**, and connect it to the project. This creates the Supabase project and sets `POSTGRES_URL_NON_POOLING`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY`. Do every later Supabase setting (phone login) in this project, opened from Vercel's Storage tab.
+   - **An existing supabase.com project:** add `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (Supabase → Project Settings → API keys) and `DATABASE_URL` (Supabase → **Connect** → **Session pooler**, password filled in) under Vercel → Settings → Environment Variables.
+3. **Redeploy** (Deployments → ⋯ → Redeploy). The build log shows `[migrate] ... database is up to date`, and the site is live at the project's `.vercel.app` link.
 
 Optional variables:
 - `NEXT_PUBLIC_SITE_URL`: only once a custom domain such as rdfashion.in is attached. Until then, the Vercel production domain is used.
