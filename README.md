@@ -51,9 +51,10 @@ The database sets itself up: `npm run build` first runs `scripts/migrate.mjs`, w
 
 1. **Vercel**: Add New → Project → import `raghavch2025/rdfasion` → Deploy. This first deploy has no database yet; that's expected.
 2. **Database**, pick one:
-   - **From Vercel (easiest):** in the Vercel project, **Storage → Create Database → Supabase**, choose region **Mumbai (ap-south-1)**, and connect it to the project. This creates the Supabase project and sets `POSTGRES_URL_NON_POOLING`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY`. Do every later Supabase setting (phone login) in this project, opened from Vercel's Storage tab.
-   - **An existing supabase.com project:** add `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (Supabase → Project Settings → API keys) and `DATABASE_URL` (Supabase → **Connect** → **Session pooler**, password filled in) under Vercel → Settings → Environment Variables.
+   - **From Vercel (easiest):** in the Vercel project, **Storage → Create Database → Supabase**, choose region **Mumbai (ap-south-1)**, and connect it to the project. This creates the Supabase project and sets `POSTGRES_URL_NON_POOLING`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` and `SUPABASE_SECRET_KEY`, which the site reads directly. Do every later Supabase setting (phone login) in this project, opened from Vercel's Storage tab.
+   - **An existing supabase.com project:** add `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` and `SUPABASE_SECRET_KEY` (Supabase → Project Settings → API keys; older projects' `NEXT_PUBLIC_SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` work too) and `DATABASE_URL` (Supabase → **Connect** → **Session pooler**, password filled in) under Vercel → Settings → Environment Variables.
 3. **Redeploy** (Deployments → ⋯ → Redeploy). The build log shows `[migrate] ... database is up to date`, and the site is live at the project's `.vercel.app` link.
+4. **Check** `https://<site>/api/health`: it lists which settings the deploy sees (names only, never values) and whether the database answers. `"ok": true` means the shop is ready.
 
 Optional variables:
 - `NEXT_PUBLIC_SITE_URL`: only once a custom domain such as rdfashion.in is attached. Until then, the Vercel production domain is used.

@@ -15,24 +15,50 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import postgres from "postgres";
 
-const url = process.env.DATABASE_URL || process.env.POSTGRES_URL_NON_POOLING || process.env.POSTGRES_URL;
-if (!url) {
+const rawUrl = (process.env.DATABASE_URL || process.env.POSTGRES_URL_NON_POOLING || process.env.POSTGRES_URL || "").trim();
+if (!rawUrl) {
   console.log("[migrate] no DATABASE_URL / POSTGRES_URL set, skipping database setup");
   process.exit(0);
 }
 
+// Supabase's "Connect" strings are pasted with the password typed in as is, so
+// # / ? % in it would break URL parsing. Percent-encode the user and password
+// (the part before the last "@") and never print the URL.
+function encodeUserInfo(raw) {
+  const m = raw.match(/^(postgres(?:ql)?:\/\/)(.*)@([^@]*)$/s);
+  if (!m) return raw;
+  const [, scheme, userinfo, rest] = m;
+  const enc = (v) => {
+    let d = v;
+    try {
+      d = decodeURIComponent(v);
+    } catch {
+      // a bare % in the password: encode it as typed
+    }
+    return encodeURIComponent(d);
+  };
+  const i = userinfo.indexOf(":");
+  const user = i < 0 ? userinfo : userinfo.slice(0, i);
+  return i < 0 ? `${scheme}${enc(user)}@${rest}` : `${scheme}${enc(user)}:${enc(userinfo.slice(i + 1))}@${rest}`;
+}
+
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 const migrationsDir = path.join(root, "supabase", "migrations");
-const host = new URL(url.replace(/^postgres(ql)?:/, "http:")).hostname;
-const local = ["localhost", "127.0.0.1", "::1"].includes(host);
-// Transaction poolers (Supabase port 6543) cannot use prepared statements.
-const sql = postgres(url, {
-  ssl: local ? false : "require",
-  prepare: false,
-  max: 1,
-  onnotice: () => {},
-  connect_timeout: 20,
-});
+
+let sql;
+try {
+  const url = encodeUserInfo(rawUrl);
+  const host = new URL(url.replace(/^postgres(ql)?:/, "http:")).hostname;
+  const local = ["localhost", "127.0.0.1", "::1"].includes(host);
+  // Transaction poolers (Supabase port 6543) cannot use prepared statements.
+  sql = postgres(url, { ssl: local ? false : "require", prepare: false, max: 1, onnotice: () => {}, connect_timeout: 20 });
+} catch {
+  console.error(
+    "[migrate] the database connection string is not valid. Use Supabase → Connect → Session pooler, " +
+      "starting postgresql://, with your database password in place of [YOUR-PASSWORD].",
+  );
+  process.exit(1);
+}
 
 try {
   const files = (await readdir(migrationsDir)).filter((f) => /^\d+_.+\.sql$/.test(f)).sort();

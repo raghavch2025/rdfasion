@@ -51,7 +51,7 @@ function fal(): FalClient {
 }
 
 function webhookSecret(): string {
-  return serverEnv("CRON_SECRET") ?? serverEnv("SUPABASE_SERVICE_ROLE_KEY") ?? "dev";
+  return serverEnv("CRON_SECRET") ?? serverEnv("SUPABASE_SECRET_KEY") ?? "dev";
 }
 
 export function webhookToken(jobId: string): string {
