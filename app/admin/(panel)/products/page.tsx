@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { adminDb } from "@/lib/supabase/admin";
 import { rupees } from "@/lib/format";
+import { catalogImageUrl } from "@/lib/image-url";
 import { ProductRowActions } from "@/components/admin/ProductRowActions";
 import type { ProductStatus } from "@/lib/types";
 import { admin as s } from "@/strings";
@@ -24,7 +25,6 @@ export default async function ProductsPage() {
     .order("sort_order", { ascending: false })
     .order("created_at", { ascending: false });
   const rows = (data ?? []) as Row[];
-  const base = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/catalog/`;
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
@@ -40,7 +40,7 @@ export default async function ProductsPage() {
             <li key={p.id} className="flex items-center gap-3 p-2">
               <Link href={`/admin/products/${p.id}`} className="flex min-w-0 flex-1 items-center gap-3">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={thumb ? base + thumb : undefined} alt="" className="h-16 w-12 shrink-0 rounded bg-soft object-cover" loading="lazy" />
+                <img src={catalogImageUrl(thumb)} alt="" className="h-16 w-12 shrink-0 rounded bg-soft object-cover" loading="lazy" />
                 <div className="min-w-0">
                   <p className="truncate font-semibold">{p.name}</p>
                   <p className="text-sm text-muted">

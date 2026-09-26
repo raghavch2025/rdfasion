@@ -3,6 +3,7 @@ import { adminDb } from "@/lib/supabase/admin";
 import { signedOriginals } from "@/lib/storage";
 import { falConfigured } from "@/lib/generation";
 import { SITE_URL } from "@/lib/env";
+import { catalogImageUrl } from "@/lib/image-url";
 import { ProductEditor, type ColourView } from "@/components/admin/ProductEditor";
 import type { ProductWithColors } from "@/lib/types";
 
@@ -31,7 +32,6 @@ export default async function ProductAdminPage({ params }: { params: Promise<{ i
   const signed = await signedOriginals(
     [...new Set((images ?? []).filter((i) => i.storage_path && i.status !== "rejected").map((i) => i.storage_path))],
   );
-  const catalogBase = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/catalog/`;
 
   const colours: ColourView[] = p.product_colors.map((c) => {
     const tryon = (images ?? []).find((i) => i.color_id === c.id && i.kind === "tryon");
@@ -43,7 +43,7 @@ export default async function ProductAdminPage({ params }: { params: Promise<{ i
       hex: c.color_hex,
       status: c.status,
       soldOutSizes: c.sold_out_sizes,
-      approvedUrl: c.approved_image_path ? catalogBase + c.approved_image_path : null,
+      approvedUrl: catalogImageUrl(c.approved_image_path) ?? null,
       originalUrl: originalPath ? (signed[originalPath] ?? null) : null,
       candidate:
         tryon && tryon.status === "pending_approval" ? { id: tryon.id, url: signed[tryon.storage_path] ?? null } : null,

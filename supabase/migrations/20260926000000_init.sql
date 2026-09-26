@@ -1,5 +1,6 @@
 -- RD Fashion wholesale ordering: initial schema (PRD.md › "Data model").
 -- Eight tables, RLS on every table, indexes, storage buckets.
+-- Safe to run again over a partly applied database (if not exists / or replace).
 --
 -- Access model
 --   * Anonymous buyers read live products, their approved colours and the
@@ -14,13 +15,13 @@
 -- Tables
 -- ---------------------------------------------------------------------------
 
-create table public.settings (
+create table if not exists public.settings (
   key        text primary key,
   value      jsonb not null,
   updated_at timestamptz not null default now()
 );
 
-create table public.products (
+create table if not exists public.products (
   id              uuid primary key default gen_random_uuid(),
   slug            text not null unique check (slug ~ '^[a-z0-9]+(-[a-z0-9]+)*$'),
   name            text not null check (length(trim(name)) > 0),
@@ -38,7 +39,7 @@ create table public.products (
   created_at      timestamptz not null default now()
 );
 
-create table public.product_colors (
+create table if not exists public.product_colors (
   id                  uuid primary key default gen_random_uuid(),
   product_id          uuid not null references public.products (id) on delete cascade,
   color_name          text not null check (length(trim(color_name)) > 0),
@@ -52,7 +53,7 @@ create table public.product_colors (
   unique (product_id, color_name)
 );
 
-create table public.product_images (
+create table if not exists public.product_images (
   id                  uuid primary key default gen_random_uuid(),
   product_id          uuid not null references public.products (id) on delete cascade,
   color_id            uuid references public.product_colors (id) on delete cascade,
@@ -68,7 +69,7 @@ create table public.product_images (
   created_at          timestamptz not null default now()
 );
 
-create table public.generation_jobs (
+create table if not exists public.generation_jobs (
   id          uuid primary key default gen_random_uuid(),
   product_id  uuid not null references public.products (id) on delete cascade,
   color_id    uuid references public.product_colors (id) on delete cascade,
@@ -81,7 +82,7 @@ create table public.generation_jobs (
   finished_at timestamptz
 );
 
-create table public.buyers (
+create table if not exists public.buyers (
   id            uuid primary key default gen_random_uuid(),
   phone         text not null unique check (phone ~ '^[0-9]{10}$'),
   name          text not null,
@@ -93,9 +94,9 @@ create table public.buyers (
 );
 
 -- Order codes: RD- plus a sequence starting at 1001.
-create sequence public.order_code_seq start with 1001;
+create sequence if not exists public.order_code_seq start with 1001;
 
-create table public.orders (
+create table if not exists public.orders (
   id              uuid primary key default gen_random_uuid(),
   code            text not null unique default ('RD-' || nextval('public.order_code_seq')),
   buyer_id        uuid not null references public.buyers (id) on delete restrict,
@@ -116,7 +117,7 @@ create table public.orders (
 
 alter sequence public.order_code_seq owned by public.orders.code;
 
-create table public.order_items (
+create table if not exists public.order_items (
   id              uuid primary key default gen_random_uuid(),
   order_id        uuid not null references public.orders (id) on delete cascade,
   product_id      uuid not null references public.products (id) on delete restrict,
@@ -131,19 +132,19 @@ create table public.order_items (
 -- Indexes (orders.code and buyers.phone are covered by their unique constraints)
 -- ---------------------------------------------------------------------------
 
-create index orders_status_created_at_idx on public.orders (status, created_at desc);
-create index products_status_sort_order_idx on public.products (status, sort_order);
-create index product_images_product_color_status_idx
+create index if not exists orders_status_created_at_idx on public.orders (status, created_at desc);
+create index if not exists products_status_sort_order_idx on public.products (status, sort_order);
+create index if not exists product_images_product_color_status_idx
   on public.product_images (product_id, color_id, status);
-create index product_colors_product_id_idx on public.product_colors (product_id);
-create index order_items_order_id_idx on public.order_items (order_id);
-create index generation_jobs_status_idx on public.generation_jobs (status);
+create index if not exists product_colors_product_id_idx on public.product_colors (product_id);
+create index if not exists order_items_order_id_idx on public.order_items (order_id);
+create index if not exists generation_jobs_status_idx on public.generation_jobs (status);
 
 -- ---------------------------------------------------------------------------
 -- Triggers
 -- ---------------------------------------------------------------------------
 
-create function public.touch_updated_at() returns trigger
+create or replace function public.touch_updated_at() returns trigger
 language plpgsql as $$
 begin
   new.updated_at := now();
@@ -151,11 +152,11 @@ begin
 end;
 $$;
 
-create trigger orders_touch_updated_at
+create or replace trigger orders_touch_updated_at
   before update on public.orders
   for each row execute function public.touch_updated_at();
 
-create trigger settings_touch_updated_at
+create or replace trigger settings_touch_updated_at
   before update on public.settings
   for each row execute function public.touch_updated_at();
 
@@ -166,7 +167,7 @@ create trigger settings_touch_updated_at
 -- True when the signed-in user's phone (last 10 digits; Supabase stores it as
 -- 919313877748) is in settings 'admin_phones', a JSON array of 10-digit strings.
 -- security definer so it can read the admin list, which RLS hides from others.
-create function public.is_admin() returns boolean
+create or replace function public.is_admin() returns boolean
 language sql stable security definer set search_path = '' as $$
   select exists (
     select 1
@@ -194,14 +195,17 @@ alter table public.orders          enable row level security;
 alter table public.order_items     enable row level security;
 
 -- Public reads
+drop policy if exists "public reads public settings" on public.settings;
 create policy "public reads public settings" on public.settings
   for select to anon, authenticated
   using (key = 'public');
 
+drop policy if exists "public reads live products" on public.products;
 create policy "public reads live products" on public.products
   for select to anon, authenticated
   using (status in ('live', 'sold_out'));
 
+drop policy if exists "public reads approved colours of live products" on public.product_colors;
 create policy "public reads approved colours of live products" on public.product_colors
   for select to anon, authenticated
   using (
@@ -213,13 +217,21 @@ create policy "public reads approved colours of live products" on public.product
   );
 
 -- Admin: full read and write on everything
+drop policy if exists "admin all" on public.settings;
 create policy "admin all" on public.settings        for all to authenticated using (public.is_admin()) with check (public.is_admin());
+drop policy if exists "admin all" on public.products;
 create policy "admin all" on public.products        for all to authenticated using (public.is_admin()) with check (public.is_admin());
+drop policy if exists "admin all" on public.product_colors;
 create policy "admin all" on public.product_colors  for all to authenticated using (public.is_admin()) with check (public.is_admin());
+drop policy if exists "admin all" on public.product_images;
 create policy "admin all" on public.product_images  for all to authenticated using (public.is_admin()) with check (public.is_admin());
+drop policy if exists "admin all" on public.generation_jobs;
 create policy "admin all" on public.generation_jobs for all to authenticated using (public.is_admin()) with check (public.is_admin());
+drop policy if exists "admin all" on public.buyers;
 create policy "admin all" on public.buyers          for all to authenticated using (public.is_admin()) with check (public.is_admin());
+drop policy if exists "admin all" on public.orders;
 create policy "admin all" on public.orders          for all to authenticated using (public.is_admin()) with check (public.is_admin());
+drop policy if exists "admin all" on public.order_items;
 create policy "admin all" on public.order_items     for all to authenticated using (public.is_admin()) with check (public.is_admin());
 
 -- ---------------------------------------------------------------------------
@@ -231,6 +243,7 @@ values ('catalog', 'catalog', true),
        ('originals', 'originals', false)
 on conflict (id) do nothing;
 
+drop policy if exists "admin manages catalog and originals" on storage.objects;
 create policy "admin manages catalog and originals" on storage.objects
   for all to authenticated
   using (bucket_id in ('catalog', 'originals') and public.is_admin())

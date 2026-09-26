@@ -1,6 +1,5 @@
--- Seed data: settings plus 3 sample products (PRD.md › "Business context").
--- Image paths point into the public `catalog` bucket; upload matching files
--- under catalog/seed/ (or replace them from /admin once it exists).
+-- Seed data: shop settings plus the first design (PRD.md › "Business context").
+-- scripts/migrate.mjs loads this file once, while settings has no admin list.
 
 insert into public.settings (key, value) values
   ('public', jsonb_build_object(
@@ -39,30 +38,28 @@ insert into public.settings (key, value) values
    }')
 on conflict (key) do update set value = excluded.value;
 
+-- One real design from the shop: raglan full sleeve tee in 5 colourways
+-- (body / sleeves). Photos in public/seed/. Price is a placeholder to set in
+-- /admin/products; fabric and GSM are left for the shop to fill in.
 with p as (
   insert into public.products
-    (slug, name, category, fabric, gsm, price_per_piece, status, sort_order)
+    (slug, name, category, price_per_piece, status, sort_order)
   values
-    ('boxy-henley-tee', 'Boxy fit henley tee', 'tshirt', 'Cotton',       '220', 260, 'live', 3),
-    ('cargo-jogger',    'Cargo jogger',        'cargo',  'Cotton twill', '280', 480, 'live', 2),
-    ('track-lower',     'Track lower',         'lower',  'Lycra',        '240', 290, 'live', 1)
+    ('raglan-full-sleeve-tee', 'Raglan full sleeve tee', 'tshirt', 300, 'live', 1)
   on conflict (slug) do nothing
   returning id, slug
 )
 insert into public.product_colors
-  (product_id, color_name, color_hex, source, approved_image_path, thumb_path, status, sold_out_sizes)
+  (product_id, color_name, color_hex, source, approved_image_path, thumb_path, status)
 select p.id, c.color_name, c.color_hex, 'photo',
-       'seed/' || p.slug || '-' || c.file || '.webp',
-       'seed/' || p.slug || '-' || c.file || '-400.webp',
-       'approved', c.sold_out_sizes
+       '/seed/raglan-tee-' || c.file || '.webp',
+       '/seed/raglan-tee-' || c.file || '.webp',
+       'approved'
 from p
-join (values
-  ('boxy-henley-tee', 'Olive',        '#5B5B2E', 'olive',        '{}'::text[]),
-  ('boxy-henley-tee', 'Black',        '#111111', 'black',        '{}'),
-  ('boxy-henley-tee', 'White',        '#FFFFFF', 'white',        '{XXL}'),
-  ('cargo-jogger',    'Black',        '#111111', 'black',        '{}'),
-  ('cargo-jogger',    'Olive',        '#5B5B2E', 'olive',        '{}'),
-  ('track-lower',     'Navy',         '#1F2A44', 'navy',         '{}'),
-  ('track-lower',     'Grey melange', '#9A9A9A', 'grey-melange', '{}'),
-  ('track-lower',     'Black',        '#111111', 'black',        '{}')
-) as c (slug, color_name, color_hex, file, sold_out_sizes) on c.slug = p.slug;
+cross join (values
+  ('Grey / Black',  '#9E9E9E', 'grey-black'),
+  ('Blue / White',  '#1F4FB5', 'blue-white'),
+  ('White / Blue',  '#F2F2F2', 'white-blue'),
+  ('Grey / White',  '#8C8C8C', 'grey-white'),
+  ('Brown / White', '#7A5540', 'brown-white')
+) as c (color_name, color_hex, file);

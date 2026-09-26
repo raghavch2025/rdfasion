@@ -1,6 +1,11 @@
 export const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
 export const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
-export const SITE_URL = (process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000").replace(/\/$/, "");
+// Falls back to the Vercel production domain, so NEXT_PUBLIC_SITE_URL is only
+// needed once a custom domain (rdfashion.in) is attached.
+const vercelHost = process.env.VERCEL_PROJECT_PRODUCTION_URL ?? process.env.NEXT_PUBLIC_VERCEL_PROJECT_PRODUCTION_URL;
+export const SITE_URL = (
+  process.env.NEXT_PUBLIC_SITE_URL || (vercelHost ? `https://${vercelHost}` : "http://localhost:3000")
+).replace(/\/$/, "");
 export const SITE_HOST = SITE_URL.replace(/^https?:\/\//, "");
 export const DEFAULT_WHATSAPP = "919313877748";
 export const DEFAULT_CALL = "9313877748";

@@ -7,15 +7,15 @@
 -- ---------------------------------------------------------------------------
 
 alter table public.orders
-  add column transport_name text,
-  add column lr_number      text,
-  add column cancel_reason  text;
+  add column if not exists transport_name text,
+  add column if not exists lr_number      text,
+  add column if not exists cancel_reason  text;
 
 alter table public.products
   -- The real shop photo, copied to the public catalog bucket on publish and
   -- shown as a second image so retailers see the real fabric.
-  add column original_image_path text,
-  add column print_type text check (print_type in ('solid', 'print', 'stripe'));
+  add column if not exists original_image_path text,
+  add column if not exists print_type text check (print_type in ('solid', 'print', 'stripe'));
 
 -- ---------------------------------------------------------------------------
 -- place_order: the only way an order is written. Validates availability,
@@ -31,7 +31,7 @@ alter table public.products
 -- bad_size:<color_id>:<size>, moq:<color_id>.
 -- ---------------------------------------------------------------------------
 
-create function public.place_order(p jsonb) returns jsonb
+create or replace function public.place_order(p jsonb) returns jsonb
 language plpgsql security definer set search_path = '' as $$
 declare
   v_name   text := trim(coalesce(p #>> '{buyer,name}', ''));
@@ -162,7 +162,7 @@ end $$;
 -- Funnel events (written by POST /api/events with the service role)
 -- ---------------------------------------------------------------------------
 
-create table public.events (
+create table if not exists public.events (
   id           bigint generated always as identity primary key,
   name         text not null check (name in ('catalogue_view', 'product_view', 'add_to_cart',
                                              'checkout_start', 'order_saved', 'whatsapp_opened')),
@@ -174,10 +174,11 @@ create table public.events (
   created_at   timestamptz not null default now()
 );
 
-create index events_created_at_idx on public.events (created_at desc);
-create index events_name_created_at_idx on public.events (name, created_at desc);
+create index if not exists events_created_at_idx on public.events (created_at desc);
+create index if not exists events_name_created_at_idx on public.events (name, created_at desc);
 
 alter table public.events enable row level security;
+drop policy if exists "admin all" on public.events;
 create policy "admin all" on public.events for all to authenticated
   using (public.is_admin()) with check (public.is_admin());
 
@@ -185,7 +186,7 @@ create policy "admin all" on public.events for all to authenticated
 -- Web Push subscriptions for admin phones
 -- ---------------------------------------------------------------------------
 
-create table public.push_subscriptions (
+create table if not exists public.push_subscriptions (
   id         uuid primary key default gen_random_uuid(),
   endpoint   text not null unique,
   p256dh     text not null,
@@ -195,7 +196,8 @@ create table public.push_subscriptions (
 );
 
 alter table public.push_subscriptions enable row level security;
+drop policy if exists "admin all" on public.push_subscriptions;
 create policy "admin all" on public.push_subscriptions for all to authenticated
   using (public.is_admin()) with check (public.is_admin());
 
-create index generation_jobs_product_id_idx on public.generation_jobs (product_id);
+create index if not exists generation_jobs_product_id_idx on public.generation_jobs (product_id);

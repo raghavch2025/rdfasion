@@ -31,6 +31,7 @@ PRD.md          the spec
 ```bash
 npm install
 npx supabase start          # local Postgres/Auth/Storage (Docker); applies migrations + seed
+# or against any Postgres/Supabase: DATABASE_URL=postgres://... npm run db:migrate
 cp .env.example .env.local  # fill from `npx supabase status`
 npm run dev
 ```
@@ -46,18 +47,28 @@ Checks: `npm test` (MOQ, totals, Indian number format, WhatsApp message format),
 
 ## Going live
 
-1. **Supabase project**: `npx supabase link` then `npx supabase db push`, and run `supabase/seed.sql` once (it upserts settings and 3 sample designs; delete the samples from `/admin/products` or leave them hidden).
-2. **Phone login**: enable the Phone provider in Supabase Auth with an SMS provider (Twilio, MessageBird or Textlocal work for India). Leave "time-box user sessions" off so admin phones stay signed in; cookies last 90 days.
-3. **Settings to fill** (in `/admin/settings` or the `settings` table):
-   - `owner_phones`: Raghav's number. Only owner numbers can change the WhatsApp number and the admin list.
-   - `admin_phones`: already 9313877748 and 9643195625.
-   - Shop hours and Google rating (the PRD could not read the Google listing).
-   - Base-model photos: two poses, used for every try-on.
-4. **Vercel**: region `bom1` is set in `vercel.json`. Add the env vars from `.env.example`.
-   - `NEXT_PUBLIC_VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY`: create them with `npx web-push generate-vapid-keys`. The public key needs the `NEXT_PUBLIC_` prefix because the browser subscribes with it.
-   - Image resizing uses Supabase image transformation (Pro plan). On the free plan, set `NEXT_PUBLIC_IMAGE_TRANSFORM=off`.
-   - The cron runs daily, the most Vercel Hobby allows. That is enough because fal webhooks and the admin page's polling finish jobs; on Pro you can make it every 5 minutes.
-5. **Links**: bio `https://rdfashion.in/?s=bio`; reels use the link from the design's share box (`/p/<slug>?s=reel&r=<slug>`).
+The database sets itself up: `npm run build` first runs `scripts/migrate.mjs`, which applies `supabase/migrations/*.sql` (and `supabase/seed.sql` the first time) straight to Postgres. So a Vercel deploy needs no SQL editor.
+
+1. **Supabase**: create a project in the Mumbai (`ap-south-1`) region.
+2. **Vercel**: Add New → Project → import `raghavch2025/rdfasion`. Then either:
+   - **Easiest:** in the Vercel project open **Storage → Connect Database → Supabase** and pick the project. That sets `POSTGRES_URL_NON_POOLING`, `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` and `SUPABASE_SERVICE_ROLE_KEY` for you. Or:
+   - **By hand:** add `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY` (Supabase → Project Settings → API keys) and `DATABASE_URL` (Supabase → **Connect** → **Session pooler** connection string, with your database password filled in).
+3. **Deploy.** The build log shows `[migrate] ... database is up to date`, and Vercel shows the live link.
+
+Optional variables:
+- `NEXT_PUBLIC_SITE_URL`: only once a custom domain such as rdfashion.in is attached. Until then, the Vercel production domain is used.
+- `NEXT_PUBLIC_IMAGE_TRANSFORM=on`: on Supabase Pro, serves resized WebP images. Without it, images are served as uploaded.
+- `CRON_SECRET`: turns on the daily retry of stuck AI image jobs.
+- `NEXT_PUBLIC_VAPID_PUBLIC_KEY` and `VAPID_PRIVATE_KEY` (`npx web-push generate-vapid-keys`): new-order notifications on admin phones.
+- `FAL_KEY` and `ANTHROPIC_API_KEY`: AI model images and photo auto-fill.
+
+After the first deploy:
+- **Admin login** needs the Phone provider on in Supabase Auth with an SMS provider (Twilio, MessageBird or Textlocal work for India). Leave "time-box user sessions" off so admin phones stay signed in; cookies last 90 days.
+- **Settings** (`/admin/settings`): put Raghav's number in `owner_phones` (only owners can change the WhatsApp number and the admin list). Add shop hours and the Google rating, and base-model photos for try-on.
+- **The first design** (raglan full sleeve tee, 5 colours, photos in `public/seed/`) has a placeholder price of ₹300; set the real price in `/admin/products`.
+- **Links**: bio `https://<site>/?s=bio`; reels use the link from each design's share box.
+
+Running the SQL by hand instead (Supabase SQL editor): paste each migration file whole (about 250 and 200 lines), click once in the editor so nothing is highlighted (the button must say **Run**, not **Run selected**), then run. The files are safe to run again, and `scripts/migrate.mjs` also finishes a half-done manual setup.
 
 ## How orders stay safe
 
@@ -68,7 +79,7 @@ Checks: `npm test` (MOQ, totals, Indian number format, WhatsApp message format),
 
 ## Test results (local Supabase stack, Chromium at 360 px, Instagram in-app user agent)
 
-All PRD acceptance tests that can run without a real phone passed (34 checks), including:
+All PRD acceptance tests that can run without a real phone passed (35 checks), including:
 - catalogue loads in the Instagram UA with no horizontal scroll
 - Add to cart blocked at 5 pieces, allowed at 6
 - 9-digit mobile rejected; 10 digits saves and opens `wa.me/919313877748` with the exact PRD message
