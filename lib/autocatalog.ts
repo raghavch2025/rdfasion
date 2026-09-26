@@ -14,7 +14,13 @@ import { parsePrice } from "./parse.ts";
 // every photo is redone by AI try-on on the shop's one base model, so the
 // whole catalogue shows the same model. Papa then sets the rate and publishes.
 
-export const MAX_BATCH_PHOTOS = 30;
+// At most 20 images go to Claude in one request (above 20, each image must be
+// 2000 px or smaller), so a batch holds up to 20 photos, and reference photos
+// of existing designs fill whatever room is left.
+export const MAX_BATCH_PHOTOS = 20;
+const MAX_IMAGES_PER_REQUEST = 20;
+// A batch stuck in "processing" this long (function limit hit) may be run again.
+export const STUCK_PROCESSING_MS = 3 * 60 * 1000;
 
 type Item = { id: string; storage_path: string; caption: string | null };
 export type BatchSummary = {
@@ -22,6 +28,10 @@ export type BatchSummary = {
   skipped: number;
   grouped_by: "claude" | "one-per-photo";
   ai_images: "queued" | "not-configured" | "not-needed";
+  // Colours that need a look before they can go live: one photo showed
+  // several colours (flat-lay), or no AI image could be made for them.
+  needs_review: string[];
+  note?: string;
 };
 
 export { parsePrice } from "./parse.ts";
@@ -91,11 +101,12 @@ function onePerPhoto(items: Item[]): Grouping {
 // cannot run it twice). Returns the summary also stored on the batch.
 export async function processBatch(batchId: string): Promise<BatchSummary | null> {
   const db = adminDb();
+  const stuckBefore = new Date(Date.now() - STUCK_PROCESSING_MS).toISOString();
   const { data: claimed } = await db
     .from("upload_batches")
-    .update({ status: "processing", error: null })
+    .update({ status: "processing", error: null, last_item_at: new Date().toISOString() })
     .eq("id", batchId)
-    .in("status", ["collecting", "failed"])
+    .or(`status.in.(collecting,failed),and(status.eq.processing,last_item_at.lt.${stuckBefore})`)
     .select("id, price_hint")
     .maybeSingle();
   if (!claimed) return null;
@@ -119,26 +130,36 @@ export async function processBatch(batchId: string): Promise<BatchSummary | null
       settingsValue<Record<string, string[]>>("size_sets", {}),
     ]);
 
-    // Existing designs (with a photo) Claude may add colours to.
-    const { data: prods } = await db
-      .from("products")
-      .select("id, name, category, status, product_colors (approved_image_path, status)")
-      .in("status", ["live", "hidden", "draft", "sold_out"])
-      .order("created_at", { ascending: false })
-      .limit(25);
-    const existing = (prods ?? [])
-      .map((p) => {
-        const c = (p.product_colors as { approved_image_path: string | null; status: string }[]).find((x) => x.approved_image_path);
-        const url = absoluteImage(c?.approved_image_path);
-        return url ? { id: p.id as string, name: p.name as string, category: p.category as string, url } : null;
-      })
-      .filter((e): e is NonNullable<typeof e> => e !== null);
+    // Existing designs Claude may add colours to: a catalogue photo, or for a
+    // draft still waiting for its AI photos, the shop photo it was made from.
+    const room = Math.max(0, MAX_IMAGES_PER_REQUEST - items.length);
+    const { data: prods } = room
+      ? await db
+          .from("products")
+          .select("id, name, category, status, product_colors (approved_image_path), product_images (kind, storage_path, created_at)")
+          .in("status", ["live", "hidden", "draft", "sold_out"])
+          .order("created_at", { ascending: false })
+          .limit(40)
+      : { data: [] };
+    const candidates = (prods ?? []).map((p) => {
+      const c = (p.product_colors as { approved_image_path: string | null }[]).find((x) => x.approved_image_path);
+      const orig = (p.product_images as { kind: string; storage_path: string; created_at: string }[])
+        .filter((i) => i.kind === "original" && i.storage_path)
+        .sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
+      return { id: p.id as string, name: p.name as string, category: p.category as string, catalog: absoluteImage(c?.approved_image_path), original: orig?.storage_path ?? null };
+    });
+    const withPhoto = candidates.filter((c) => c.catalog || c.original).slice(0, room);
+    const origUrls = await Promise.all(withPhoto.map((c) => (c.catalog ? Promise.resolve(null) : signedOriginal(c.original!, 1800))));
+    const existing = withPhoto
+      .map((c, i) => ({ id: c.id, name: c.name, category: c.category, url: c.catalog ?? origUrls[i] ?? "" }))
+      .filter((e) => e.url);
 
     const signed = await Promise.all(items.map((i) => signedOriginal(i.storage_path, 1800)));
     const photos = items.map((it, i) => ({ number: i + 1, url: signed[i] ?? "", caption: it.caption })).filter((p) => p.url);
 
     const claude = await groupPhotos(photos, existing, palette.map((p) => p.name));
     const grouping = claude ?? onePerPhoto(items);
+    const claudeSet = Boolean(process.env.ANTHROPIC_API_KEY);
 
     const aiReady = falConfigured() && Boolean(await baseModelPath());
     const summary: BatchSummary = {
@@ -146,6 +167,8 @@ export async function processBatch(batchId: string): Promise<BatchSummary | null
       skipped: 0,
       grouped_by: claude ? "claude" : "one-per-photo",
       ai_images: "not-needed",
+      needs_review: [],
+      note: !claude && claudeSet ? "Claude se grouping nahi ho payi (time ya photo ki dikkat); har photo alag design bani." : undefined,
     };
     const used = new Set<number>();
     const toGenerate = new Map<string, string[]>();
@@ -162,6 +185,11 @@ export async function processBatch(batchId: string): Promise<BatchSummary | null
 
       let productId = existing.some((e) => e.id === g.existing_product_id) ? g.existing_product_id : "";
       let isNew = false;
+      let productStatus = "draft";
+      if (productId) {
+        const { data: ps } = await db.from("products").select("status").eq("id", productId).single();
+        productStatus = (ps?.status as string) ?? "draft";
+      }
       if (!productId) {
         const name = (g.name || "Naya design").trim().slice(0, 80);
         const { data: created, error } = await db
@@ -195,7 +223,13 @@ export async function processBatch(batchId: string): Promise<BatchSummary | null
 
         // With AI set up, every photo is redone on the shop's one base model
         // (a photo on some other model too), so all images show the same model.
-        const needsAi = aiReady && (uses.get(ph.photo) ?? 0) === 1;
+        // A photo showing several colours (flat-lay) cannot go through try-on.
+        const flatLay = (uses.get(ph.photo) ?? 0) > 1;
+        const needsAi = aiReady && !flatLay;
+        // Without an AI image, a photo goes in as it is only on a new draft
+        // (nobody sees it until Papa publishes). On a live design, or for a
+        // flat-lay, the colour waits for Papa to look at it ("Asli photo").
+        const autoApprove = !needsAi && !flatLay && productStatus === "draft";
         const { data: colourRow, error: cErr } = await db
           .from("product_colors")
           .insert({
@@ -219,8 +253,10 @@ export async function processBatch(batchId: string): Promise<BatchSummary | null
           toGenerate.set(productId, [...(toGenerate.get(productId) ?? []), colourRow.id]);
           photoTypes[colourRow.id] = ph.is_model_photo ? "model" : "auto";
           design.ai = true;
+        } else if (!autoApprove) {
+          summary.needs_review.push(`${g.name}: ${colour}`);
         } else {
-          // Already on a model (or no AI configured): the photo goes in as it is.
+          // No AI configured, new draft: the photo goes in as it is.
           const ext = item.storage_path.split(".").pop() ?? "jpg";
           const to = `products/${productId}/${colourRow.id}.${ext}`;
           await publishToCatalog(item.storage_path, to);
@@ -301,7 +337,8 @@ export async function reviewQueue() {
 export async function recentBatches(limit = 8) {
   const { data } = await adminDb()
     .from("upload_batches")
-    .select("id, source, status, summary, error, created_at, upload_items (count)")
+    .select("id, source, status, summary, error, created_at, last_item_at, photos:upload_items (count), pending:upload_items (count)")
+    .eq("pending.status", "pending")
     .order("created_at", { ascending: false })
     .limit(limit);
   return data ?? [];

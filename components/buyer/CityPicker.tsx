@@ -56,6 +56,13 @@ export function CityPicker({
       <input
         value={query}
         onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={(e) => {
+          // Enter picks the first match (or the typed town) instead of submitting the order.
+          if (e.key !== "Enter") return;
+          e.preventDefault();
+          if (typed) onChange(matches[0]?.en ?? typed.slice(0, 60));
+        }}
+        enterKeyHint="done"
         placeholder={t.citySearch}
         aria-label={t.citySearch}
         maxLength={60}

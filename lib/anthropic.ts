@@ -29,7 +29,7 @@ const schema = {
 // Returns null when the API key is missing or the call fails; the admin then types.
 export async function analyseGarment(imageUrl: string, palette: string[]): Promise<GarmentGuess | null> {
   if (!serverEnv("ANTHROPIC_API_KEY")) return null;
-  const client = new Anthropic();
+  const client = new Anthropic({ timeout: 30_000, maxRetries: 1 });
   try {
     const response = await client.beta.messages.parse({
       model: "claude-opus-5",
@@ -135,7 +135,12 @@ export async function groupPhotos(
   palette: string[],
 ): Promise<Grouping | null> {
   if (!serverEnv("ANTHROPIC_API_KEY") || photos.length === 0) return null;
-  const client = new Anthropic();
+  // Uploads run inside one serverless request: give up after 35 s (no retry)
+  // and let the caller fall back to one design per photo.
+  const client = new Anthropic({ timeout: 35_000, maxRetries: 0 });
+  // Above 20 images per request each must be 2000 px or smaller; stay at 20.
+  existing = existing.slice(0, Math.max(0, 20 - photos.length));
+  photos = photos.slice(0, 20);
   const content: Anthropic.Beta.BetaContentBlockParam[] = [
     {
       type: "text",
@@ -169,7 +174,7 @@ export async function groupPhotos(
     const response = await client.beta.messages.parse({
       model: "claude-opus-5",
       max_tokens: 8000,
-      output_config: { effort: "medium", format: betaJSONSchemaOutputFormat(groupingSchema) },
+      output_config: { effort: "low", format: betaJSONSchemaOutputFormat(groupingSchema) },
       betas: ["server-side-fallback-2026-07-01"],
       fallbacks: "default",
       messages: [{ role: "user", content }],

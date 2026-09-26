@@ -2,7 +2,8 @@ import { after, NextResponse } from "next/server";
 import { uploadTokenOk } from "@/lib/upload-auth";
 import { addItems, createBatch, MAX_BATCH_PHOTOS, parsePrice, processBatch } from "@/lib/autocatalog";
 import { adminDb } from "@/lib/supabase/admin";
-import { ORIGINALS, extFromType } from "@/lib/storage";
+import { ORIGINALS } from "@/lib/storage";
+import { toCatalogJpeg } from "@/lib/image-normalize";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -36,9 +37,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ token: 
   const storage = adminDb().storage.from(ORIGINALS);
   const paths: string[] = [];
   for (const [i, f] of photos.entries()) {
-    const path = `uploads/${batchId}/${String(i + 1).padStart(2, "0")}-shared.${extFromType(f.type)}`;
-    const { error } = await storage.upload(path, await f.arrayBuffer(), { contentType: f.type, upsert: true });
+    let jpeg: Buffer;
+    try {
+      jpeg = await toCatalogJpeg(await f.arrayBuffer());
+    } catch {
+      continue; // a format sharp cannot read (e.g. HEIC)
+    }
+    const path = `uploads/${batchId}/${String(i + 1).padStart(2, "0")}-shared.jpg`;
+    const { error } = await storage.upload(path, jpeg, { contentType: "image/jpeg", upsert: true });
     if (!error) paths.push(path);
+  }
+  if (!paths.length) {
+    await adminDb().from("upload_batches").update({ status: "failed", error: "no readable photos" }).eq("id", batchId);
+    return NextResponse.redirect(back, 303);
   }
   await addItems(batchId, paths.map((storage_path) => ({ storage_path, caption })));
   after(async () => {

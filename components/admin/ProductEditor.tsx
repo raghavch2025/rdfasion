@@ -46,6 +46,7 @@ export function ProductEditor({ product, colours, aiReady, siteUrl }: { product:
   const router = useRouter();
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
+  const [draftPrice, setDraftPrice] = useState(product.price >= 20 ? String(product.price) : "");
   const generating = colours.some((c) => c.generation === "running");
   const allApproved = colours.length > 0 && colours.every((c) => c.status !== "pending");
 
@@ -139,7 +140,20 @@ export function ProductEditor({ product, colours, aiReady, siteUrl }: { product:
 
       {product.status === "draft" ? (
         <section className="space-y-2">
-          <Button className="w-full" disabled={pending || !allApproved} onClick={() => run(() => publishProduct(product.id))}>
+          <Field label={s.price}>
+            <input
+              value={draftPrice}
+              onChange={(e) => setDraftPrice(e.target.value.replace(/\D/g, "").slice(0, 5))}
+              inputMode="numeric"
+              placeholder="₹"
+              className={inputClass}
+            />
+          </Field>
+          <Button
+            className="w-full"
+            disabled={pending || !allApproved || !draftPrice}
+            onClick={() => run(() => publishProduct(product.id, Number.parseInt(draftPrice, 10)))}
+          >
             {s.publish}
           </Button>
           {!allApproved && <p className="text-center text-sm text-muted">{s.publishBlocked}</p>}

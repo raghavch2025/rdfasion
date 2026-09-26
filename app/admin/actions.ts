@@ -7,7 +7,8 @@ import { isAllowedAdminPhone, requireAdmin } from "@/lib/auth";
 import { analyseGarment, type GarmentGuess } from "@/lib/anthropic";
 import { falConfigured, retryColour, startGeneration, advanceJobs, baseModelPath } from "@/lib/generation";
 import { normalizePhone } from "@/lib/format";
-import { publishToCatalog, signedOriginal, slugify, ORIGINALS } from "@/lib/storage";
+import { signedOriginal, slugify, ORIGINALS } from "@/lib/storage";
+import { applyOriginal, approveCandidate, publishDesign } from "@/lib/catalog-admin";
 import { CATEGORIES, ORDER_STATUSES, type Category, type OrderStatus, type PaletteColour } from "@/lib/types";
 
 type Result = { ok: true } | { ok: false; error: string };
@@ -184,7 +185,7 @@ export async function saveDesign(productId: string, d: DesignDetails, mode: "ai"
   await db.from("product_images").insert(images);
 
   if (mode === "manual" || !falConfigured()) {
-    for (const row of rows) await applyOriginalInner(productId, row.id);
+    for (const row of rows) await applyOriginal(productId, row.id);
   } else {
     if (!(await baseModelPath())) return { ok: false, error: "Settings mein base model photo daalein" };
     await startGeneration(productId);
@@ -192,56 +193,19 @@ export async function saveDesign(productId: string, d: DesignDetails, mode: "ai"
   return { ok: true };
 }
 
-async function colourOriginalPath(productId: string, colorId: string): Promise<string | null> {
-  const { data } = await adminDb()
-    .from("product_images")
-    .select("color_id, storage_path")
-    .eq("product_id", productId)
-    .eq("kind", "original")
-    .order("created_at", { ascending: false });
-  return data?.find((r) => r.color_id === colorId)?.storage_path ?? data?.find((r) => r.color_id === null)?.storage_path ?? null;
-}
-
-async function setColourImage(productId: string, colorId: string, fromPath: string): Promise<void> {
-  const db = adminDb();
-  const ext = fromPath.split(".").pop() ?? "jpg";
-  const to = `products/${productId}/${colorId}-${Date.now().toString(36)}.${ext}`;
-  await publishToCatalog(fromPath, to);
-  await db
-    .from("product_colors")
-    .update({ approved_image_path: to, thumb_path: to, status: "approved" })
-    .eq("id", colorId)
-    .eq("product_id", productId);
-}
-
-async function applyOriginalInner(productId: string, colorId: string) {
-  const path = await colourOriginalPath(productId, colorId);
-  if (!path) throw new Error("no photo");
-  await setColourImage(productId, colorId, path);
-  await adminDb().from("product_images").update({ status: "rejected" }).eq("color_id", colorId).eq("status", "pending_approval");
-}
-
 export async function applyOriginalPhoto(productId: string, colorId: string): Promise<Result> {
   await requireAdmin();
-  await applyOriginalInner(productId, colorId);
-  await afterColourChange(productId);
+  try {
+    await applyOriginal(productId, colorId);
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : "photo" };
+  }
   return { ok: true };
 }
 
 export async function approveImage(productId: string, colorId: string, imageId: string): Promise<Result> {
   await requireAdmin();
-  const db = adminDb();
-  const { data: img } = await db
-    .from("product_images")
-    .select("storage_path, status")
-    .eq("id", imageId)
-    .eq("color_id", colorId)
-    .single();
-  if (!img || img.status !== "pending_approval") return { ok: false, error: "image" };
-  await setColourImage(productId, colorId, img.storage_path);
-  await db.from("product_images").update({ status: "approved" }).eq("id", imageId);
-  await afterColourChange(productId);
-  return { ok: true };
+  return (await approveCandidate(productId, colorId, imageId)) ? { ok: true } : { ok: false, error: "image" };
 }
 
 export async function retryImage(productId: string, colorId: string): Promise<Result> {
@@ -265,41 +229,14 @@ async function afterColourChange(productId: string) {
   revalidateCatalogue(data?.slug);
 }
 
-// A design cannot go live with an unapproved colour.
-export async function publishProduct(productId: string): Promise<Result> {
+// A design cannot go live with an unapproved colour or without a real rate
+// (drafts made from uploads carry a placeholder rate of ₹1).
+export async function publishProduct(productId: string, price?: number): Promise<Result> {
   await requireAdmin();
-  const db = adminDb();
-  const { data: p } = await db
-    .from("products")
-    .select("id, slug, status, original_image_path, product_colors (status)")
-    .eq("id", productId)
-    .single();
-  if (!p) return { ok: false, error: "not found" };
-  const colours = p.product_colors as { status: string }[];
-  if (colours.length === 0 || colours.some((c) => c.status === "pending")) return { ok: false, error: "unapproved" };
-
-  let original = p.original_image_path as string | null;
-  if (!original) {
-    const { data: o } = await db
-      .from("product_images")
-      .select("storage_path")
-      .eq("product_id", productId)
-      .eq("kind", "original")
-      .is("color_id", null)
-      .maybeSingle();
-    if (o?.storage_path) {
-      original = await publishToCatalog(o.storage_path, `products/${productId}/original.${o.storage_path.split(".").pop() ?? "jpg"}`);
-    }
-  }
-  const { data: top } = await db.from("products").select("sort_order").order("sort_order", { ascending: false }).limit(1).maybeSingle();
-  await db
-    .from("products")
-    .update({ status: "live", original_image_path: original, sort_order: (top?.sort_order ?? 0) + 1 })
-    .eq("id", productId);
-  revalidatePath("/admin/products");
-  revalidatePath(`/admin/products/${productId}`);
-  revalidateCatalogue(p.slug);
-  return { ok: true };
+  const res = await publishDesign(productId, price === undefined ? {} : { price });
+  if (res.ok) return res;
+  const msg: Record<string, string> = { unapproved: "Pehle har colour ki photo approve karein", rate: "Wholesale rate daalein (₹20 se zyada)" };
+  return { ok: false, error: msg[res.error] ?? res.error };
 }
 
 // ---------------------------------------------------------------- products

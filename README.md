@@ -76,10 +76,11 @@ Running the SQL by hand instead (Supabase SQL editor): paste each migration file
 Papa never needs to log in. Two ways in; both end in the same place.
 
 **1. Upload link** — `https://<site>/u/<UPLOAD_TOKEN>` (set `UPLOAD_TOKEN` in Vercel to 16+ random characters; admins see the link in `/admin/settings`).
-- Tap **Photos chunein**, pick the photos from WhatsApp or the gallery (all colours of a design, several designs at once), optionally type one rate, tap **Upload**.
+- Tap **Photos chunein**, pick the photos from WhatsApp or the gallery (all colours of a design, several designs at once; up to 20 per upload), optionally type one rate, tap **Upload**.
+- If an upload fails (for example Claude timed out), it shows **Phir se try karein** under *Pichhle upload*.
 - Add it to the home screen once (Chrome menu → Add to Home screen). After that, in WhatsApp: select photos → Share → **RD Upload**. The photos go straight in. (Android + Chrome only; iPhone uses the button.)
 
-**2. WhatsApp number** — Papa sends the photos to the shop's WhatsApp Business number, optionally "rate 300", then **done**. He gets a reply listing the designs made and the link to publish. Setup (once):
+**2. WhatsApp number** — Papa sends the photos to the shop's WhatsApp Business number (up to 20 at a time), optionally "rate 300", then **done** (or "ho gaya" / "हो गया"). He gets a reply listing the designs made and the link to publish. Photos sent together land in one upload, and "done" waits for photos still downloading. Setup (once):
 1. developers.facebook.com → create an app → add **WhatsApp**. The free test number works right away for up to 5 numbers: add Papa's and Bhaiya's numbers as recipients.
 2. WhatsApp → Configuration → Callback URL `https://<site>/api/whatsapp`, Verify token = your `WHATSAPP_VERIFY_TOKEN` → Verify and save → Webhook fields → subscribe **messages**.
 3. Business Settings → System users → create one, give it the app and the WhatsApp account, generate a token that **never expires** with `whatsapp_business_messaging` → `WHATSAPP_TOKEN`. (The token on the API Setup page dies within 24 hours.)
@@ -90,6 +91,9 @@ Papa never needs to log in. Two ways in; both end in the same place.
 - Claude (`ANTHROPIC_API_KEY`) looks at the new photos next to the current catalogue: the same design in different colours becomes one design with colour options; a new colour of an existing design is added to it; different designs become separate drafts. Without the key, each photo becomes its own draft to rename.
 - **One model everywhere:** with `FAL_KEY` set, every photo is redone by virtual try-on on the same base model (the first photo under Base model in `/admin/settings`; by default the model already in the shop's catalogue photos). That includes photos that already show a different model, so the whole catalogue looks like one shoot. Without `FAL_KEY` the shop's photos are used as they are. A single photo showing many colours (flat-lay) cannot go through try-on; upload one photo per colour to get model images for it.
 - On the upload link Papa checks each colour's photo (**Theek hai** / **Asli photo** / **Dobara AI**), types the **wholesale rate**, minimum pieces and sizes, and taps **Publish**. Designs already listed with shop photos get an **AI model photo banayein** button once AI is set up.
+- A colour goes live only after someone has looked at its photo, except a shop photo on a brand-new draft when AI is off: a flat-lay (one photo, many colours) and a new colour added to a live design wait for **Asli photo** or an approved AI photo. The chenille jacket's five colours start this way (cut from one flat-lay): tap **AI model photo banayein** or **Asli photo** on each, then set the rate and publish.
+- The upload link publishes new drafts only. Rates of live designs, and removing a live colour, are done in `/admin/products`.
+- Photos that reach the server (WhatsApp, share fallback) are turned into JPEG up to 1600 px. The storage buckets accept JPEG, PNG and WebP only.
 
 ## How orders stay safe
 

@@ -10,14 +10,30 @@ import {
   publish,
   removeColour,
   retry,
+  retryBatch,
   startUpload,
   applyShopPhoto,
 } from "@/app/u/actions";
 import { browserDb } from "@/lib/supabase/browser";
 import { resizeImage } from "@/components/admin/resize";
 import { CATEGORIES, type Category } from "@/lib/types";
+import type { BatchSummary } from "@/lib/autocatalog";
 import type { DeskData, DesignCard } from "@/lib/upload-view";
 import { admin as adminStrings, uploader as s } from "@/strings";
+
+// Same cap as the server (Claude sees at most 20 images per request).
+const MAX_PHOTOS = 20;
+
+function summaryText(sum: BatchSummary): string {
+  const colours = sum.designs.reduce((n, d) => n + d.colours.length, 0);
+  const notes = [s.doneSummary(sum.designs.length, colours)];
+  if (sum.ai_images === "queued") notes.push(s.aiQueued);
+  if (sum.ai_images === "not-configured") notes.push(s.aiMissing);
+  if (sum.grouped_by === "one-per-photo" && sum.designs.length > 1) notes.push(s.groupedSimple);
+  if (sum.needs_review?.length) notes.push(s.needsReview(sum.needs_review));
+  if (sum.note) notes.push(sum.note);
+  return notes.join(" ");
+}
 
 // token === null: the signed-in /admin/upload page (actions check the session).
 export function UploadDesk({ token, data }: { token: string | null; data: DeskData }) {
@@ -78,13 +94,14 @@ export function UploadDesk({ token, data }: { token: string | null; data: DeskDa
     async (list: File[], rateText: string) => {
       setError(null);
       setResult(null);
-      const chosen = list.slice(0, 30);
+      const chosen = list.slice(0, MAX_PHOTOS);
       const start = await startUpload(token, chosen.length);
       if (!start.ok) return setError(start.error);
       const db = browserDb();
       const done: string[] = [];
-      for (let i = 0; i < chosen.length; i++) {
-        setProgress(s.uploading(i, chosen.length));
+      const total = Math.min(chosen.length, start.uploads.length);
+      for (let i = 0; i < total; i++) {
+        setProgress(s.uploading(i, total));
         const blob = await resizeImage(chosen[i]);
         const u = start.uploads[i];
         const { error: upErr } = await db.storage.from("originals").uploadToSignedUrl(u.path, u.token, blob, { contentType: "image/jpeg" });
@@ -96,19 +113,23 @@ export function UploadDesk({ token, data }: { token: string | null; data: DeskDa
       setProgress(null);
       setFiles([]);
       if (!res.ok) return setError(res.error);
-      const sum = res.summary;
-      if (sum) {
-        const colours = sum.designs.reduce((n, d) => n + d.colours.length, 0);
-        const notes = [s.doneSummary(sum.designs.length, colours)];
-        if (sum.ai_images === "queued") notes.push(s.aiQueued);
-        if (sum.ai_images === "not-configured") notes.push(s.aiMissing);
-        if (sum.grouped_by === "one-per-photo" && sum.designs.length > 1) notes.push(s.groupedSimple);
-        setResult(notes.join(" "));
-      }
+      if (res.summary) setResult(summaryText(res.summary));
       router.refresh();
     },
     [token, router],
   );
+
+  const [retrying, setRetrying] = useState<string | null>(null);
+  const againBatch = async (batchId: string) => {
+    setRetrying(batchId);
+    setError(null);
+    setResult(null);
+    const res = await retryBatch(token, batchId);
+    setRetrying(null);
+    if (!res.ok) setError(res.error);
+    else if (res.summary) setResult(summaryText(res.summary));
+    router.refresh();
+  };
 
   return (
     <div className="mx-auto max-w-xl space-y-6 px-3 pt-4 pb-16">
@@ -136,9 +157,10 @@ export function UploadDesk({ token, data }: { token: string | null; data: DeskDa
             onChange={(e) => setFiles(Array.from(e.target.files ?? []))}
           />
         </label>
+        {files.length > MAX_PHOTOS && <p className="text-sm font-semibold text-accent">{s.tooMany(MAX_PHOTOS)}</p>}
         {files.length > 0 && (
           <div className="flex gap-1 overflow-x-auto">
-            {files.slice(0, 30).map((f, i) => (
+            {files.slice(0, MAX_PHOTOS).map((f, i) => (
               // eslint-disable-next-line @next/next/no-img-element
               <img key={i} src={URL.createObjectURL(f)} alt="" className="h-20 w-16 shrink-0 rounded object-cover" />
             ))}
@@ -180,15 +202,26 @@ export function UploadDesk({ token, data }: { token: string | null; data: DeskDa
           <h2 className="font-bold">{s.batches}</h2>
           <ul className="divide-y divide-line rounded-lg border border-line text-sm">
             {data.batches.map((b) => (
-              <li key={b.id} className="flex justify-between gap-2 px-3 py-2">
-                <span>
-                  {new Date(b.createdAt).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Kolkata" })} ·{" "}
-                  {b.source === "whatsapp" ? s.fromWhatsapp : s.fromLink} · {b.photos} photo
-                </span>
-                <span className="font-semibold">
-                  {s.batchStatus[b.status] ?? b.status}
-                  {b.summary ? ` · ${b.summary.designs.length} design` : ""}
-                </span>
+              <li key={b.id} className="space-y-1 px-3 py-2">
+                <div className="flex justify-between gap-2">
+                  <span>
+                    {new Date(b.createdAt).toLocaleString("en-IN", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Kolkata" })} ·{" "}
+                    {b.source === "whatsapp" ? s.fromWhatsapp : s.fromLink} · {b.photos} photo
+                  </span>
+                  <span className="font-semibold">
+                    {s.batchStatus[b.status] ?? b.status}
+                    {b.summary ? ` · ${b.summary.designs.length} design` : ""}
+                  </span>
+                </div>
+                {b.retryable && (
+                  <button
+                    onClick={() => againBatch(b.id)}
+                    disabled={retrying !== null || busy}
+                    className="min-h-11 w-full rounded-lg border-2 border-ink font-bold disabled:opacity-40"
+                  >
+                    {retrying === b.id ? s.sorting : s.retryBatch}
+                  </button>
+                )}
               </li>
             ))}
           </ul>
@@ -296,9 +329,11 @@ function DesignEditor({ token, design, aiReady }: { token: string | null; design
                     {s.retryAi}
                   </button>
                 )}
-                <button onClick={() => run(() => removeColour(token, design.id, c.id))} disabled={pending} className="min-h-10 rounded px-2 text-sm text-muted underline">
-                  {s.remove}
-                </button>
+                {(isDraft || c.status === "pending") && (
+                  <button onClick={() => run(() => removeColour(token, design.id, c.id))} disabled={pending} className="min-h-10 rounded px-2 text-sm text-muted underline">
+                    {s.remove}
+                  </button>
+                )}
               </div>
             </div>
           ))}

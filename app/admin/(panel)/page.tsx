@@ -75,7 +75,9 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<{ 
                     {o.code} · {o.buyer?.shop_name || o.buyer?.name || o.buyer?.city}
                   </p>
                   <p className="truncate text-sm text-muted">
-                    {[o.buyer?.name, o.buyer?.city].filter(Boolean).join(", ")} · {o.source} · {timeAgo(o.created_at)}
+                    {[o.buyer?.shop_name ? o.buyer.name : "", o.buyer?.shop_name || o.buyer?.name ? o.buyer.city : "", o.source, timeAgo(o.created_at)]
+                      .filter(Boolean)
+                      .join(" · ")}
                   </p>
                 </div>
                 <div className="text-right">

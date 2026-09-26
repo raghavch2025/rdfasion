@@ -1,8 +1,9 @@
 import { after, NextResponse } from "next/server";
 import { adminDb } from "@/lib/supabase/admin";
 import { downloadMedia, parseWebhook, sendText, validSignature, whatsappConfigured, type IncomingMessage } from "@/lib/whatsapp-cloud";
-import { addItems, createBatch, MAX_BATCH_PHOTOS, parsePrice, processBatch } from "@/lib/autocatalog";
-import { ORIGINALS, extFromType } from "@/lib/storage";
+import { addItems, MAX_BATCH_PHOTOS, parsePrice, processBatch } from "@/lib/autocatalog";
+import { ORIGINALS } from "@/lib/storage";
+import { toCatalogJpeg } from "@/lib/image-normalize";
 import { normalizePhone } from "@/lib/format";
 import { SITE_URL } from "@/lib/env";
 import { uploadLinkPath } from "@/lib/upload-auth";
@@ -16,9 +17,12 @@ export const maxDuration = 60;
 // colours, AI images) and the reply says what was made, with the link to set
 // rates and publish. Only admin/owner numbers are accepted.
 
-const DONE = /^(done|ho ?gaya|ho gya|hogaya|bas|finish|ok done|publish|ready|हो गया|बस)\b/i;
+// \b does not work for Devanagari, so end on a space, punctuation or the end.
+const DONE = /^(done|ho ?gaya|ho gya|hogaya|bas|finish|ok done|publish|ready|हो गया|होगया|बस)(?=$|[\s.!,])/i;
 const HELP = /^(help|madad|\?|hi|hello|namaste)$/i;
-const OPEN_BATCH_MINUTES = 120;
+// "done" waits this long for photos that were sent just before it and are
+// still downloading (each photo is its own webhook, handled in parallel).
+const DONE_WAIT_MS = 15_000;
 
 // Webhook verification: echo hub.challenge as plain text.
 export async function GET(req: Request) {
@@ -56,7 +60,13 @@ export async function POST(req: Request) {
   }
   if (fresh.length) {
     after(async () => {
-      for (const m of fresh) await handle(m).catch((e) => console.error("whatsapp message", m.id, e));
+      for (const m of fresh) {
+        await handle(m).catch(async (e) => {
+          console.error("whatsapp message", m.id, e);
+          // A photo that could not be saved no longer holds up "done".
+          if (m.type === "image") await db.from("whatsapp_messages").update({ kind: "image-failed" }).eq("id", m.id);
+        });
+      }
     });
   }
   return NextResponse.json({ ok: true });
@@ -67,21 +77,31 @@ async function allowedPhones(): Promise<Set<string>> {
   return new Set((data ?? []).flatMap((r) => (Array.isArray(r.value) ? (r.value as string[]) : [])).map(normalizePhone));
 }
 
+// The sender's one open batch (created if needed). A database function with
+// a lock and a unique index, because photos sent together arrive as parallel
+// webhooks and must land in the same batch.
 async function openBatch(from: string): Promise<{ id: string; acked: boolean; count: number }> {
+  const { data, error } = await adminDb().rpc("open_whatsapp_batch", { p_phone: from });
+  const row = (Array.isArray(data) ? data[0] : data) as { id: string; acked: boolean; items: number } | null;
+  if (error || !row) throw new Error(error?.message ?? "no batch");
+  return { id: row.id, acked: row.acked, count: row.items };
+}
+
+// Photos whose webhook arrived but whose download has not finished yet.
+async function photosInFlight(from: string): Promise<number> {
   const db = adminDb();
-  const since = new Date(Date.now() - OPEN_BATCH_MINUTES * 60_000).toISOString();
-  const { data } = await db
-    .from("upload_batches")
-    .select("id, acked, upload_items (count)")
-    .eq("source", "whatsapp")
+  const since = new Date(Date.now() - 10 * 60_000).toISOString();
+  const { data: msgs } = await db
+    .from("whatsapp_messages")
+    .select("id")
     .eq("sender_phone", from)
-    .eq("status", "collecting")
-    .gte("last_item_at", since)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (data) return { id: data.id, acked: data.acked, count: (data.upload_items as unknown as { count: number }[])?.[0]?.count ?? 0 };
-  return { id: await createBatch("whatsapp", from), acked: false, count: 0 };
+    .in("kind", ["image", "image-failed", "image-skipped"])
+    .gte("received_at", since);
+  const ids = (msgs ?? []).map((m) => m.id);
+  if (!ids.length) return 0;
+  const { data: done } = await db.from("upload_items").select("wa_message_id").in("wa_message_id", ids);
+  const { data: failed } = await db.from("whatsapp_messages").select("id").in("id", ids).in("kind", ["image-failed", "image-skipped"]);
+  return ids.length - (done?.length ?? 0) - (failed?.length ?? 0);
 }
 
 function reviewLink(): string {
@@ -95,23 +115,35 @@ async function handle(m: IncomingMessage): Promise<void> {
   if (m.type === "image" && m.mediaId) {
     const batch = await openBatch(from);
     if (batch.count >= MAX_BATCH_PHOTOS) {
+      await db.from("whatsapp_messages").update({ kind: "image-skipped" }).eq("id", m.id);
       await sendText(m.phoneNumberId, from, `Ek baar mein ${MAX_BATCH_PHOTOS} photo tak. Pehle "done" likhein, phir baaki photos bhejein.`);
       return;
     }
-    const { bytes, mimeType } = await downloadMedia(m.mediaId, m.phoneNumberId);
-    const path = `uploads/${batch.id}/wa-${m.id.replace(/[^a-zA-Z0-9]/g, "").slice(-24)}.${extFromType(mimeType)}`;
-    const { error } = await db.storage.from(ORIGINALS).upload(path, bytes, { contentType: mimeType, upsert: true });
+    const { bytes } = await downloadMedia(m.mediaId, m.phoneNumberId);
+    let jpeg: Buffer;
+    try {
+      jpeg = await toCatalogJpeg(bytes);
+    } catch {
+      await db.from("whatsapp_messages").update({ kind: "image-failed" }).eq("id", m.id);
+      await sendText(m.phoneNumberId, from, "Yeh photo khul nahi paayi. Isse normal photo ki tarah (document nahi) dobara bhejiye.");
+      return;
+    }
+    const path = `uploads/${batch.id}/wa-${m.id.replace(/[^a-zA-Z0-9]/g, "").slice(-24)}.jpg`;
+    const { error } = await db.storage.from(ORIGINALS).upload(path, jpeg, { contentType: "image/jpeg", upsert: true });
     if (error) throw new Error(error.message);
     await addItems(batch.id, [{ storage_path: path, caption: m.caption ?? null, wa_message_id: m.id }]);
     const price = parsePrice(m.caption);
     if (price) await db.from("upload_batches").update({ price_hint: price }).eq("id", batch.id);
     if (!batch.acked) {
-      await db.from("upload_batches").update({ acked: true }).eq("id", batch.id);
-      await sendText(
-        m.phoneNumberId,
-        from,
-        "✅ Photo mil gayi. Is design ke saare colour aur baaki designs bhi bhej dijiye.\nRate ho to likh dijiye (jaise: rate 300).\nSab bhejne ke baad *done* likhein.",
-      );
+      // Several photos arrive at once: only the one that flips "acked" replies.
+      const { data: first } = await db.from("upload_batches").update({ acked: true }).eq("id", batch.id).eq("acked", false).select("id");
+      if (first?.length) {
+        await sendText(
+          m.phoneNumberId,
+          from,
+          "✅ Photo mil gayi. Is design ke saare colour aur baaki designs bhi bhej dijiye.\nRate ho to likh dijiye (jaise: rate 300).\nSab bhejne ke baad *done* likhein.",
+        );
+      }
     }
     return;
   }
@@ -119,6 +151,10 @@ async function handle(m: IncomingMessage): Promise<void> {
   if (m.type === "text" && m.text) {
     const text = m.text;
     if (DONE.test(text)) {
+      // Let photos sent just before "done" finish downloading first.
+      for (const t0 = Date.now(); Date.now() - t0 < DONE_WAIT_MS && (await photosInFlight(from)) > 0; ) {
+        await new Promise((r) => setTimeout(r, 1500));
+      }
       const batch = await openBatch(from);
       if (batch.count === 0) {
         await db.from("upload_batches").delete().eq("id", batch.id);
@@ -140,10 +176,13 @@ async function handle(m: IncomingMessage): Promise<void> {
             : summary.ai_images === "not-configured"
               ? "AI photo abhi set nahi hai, asli photo lagi hai."
               : "";
+        const review = summary.needs_review.length
+          ? `\nIn colours ki photo link par dekh lijiye: ${summary.needs_review.join(", ")}. (Ek photo mein kai colour hon to har colour ki alag photo bhejiye, tab AI model photo banegi.)`
+          : "";
         await sendText(
           m.phoneNumberId,
           from,
-          `✅ ${summary.designs.length} design taiyaar:\n${lines.join("\n")}\n${ai}\n\nRate daal ke publish karein:\n${reviewLink()}`,
+          `✅ ${summary.designs.length} design taiyaar:\n${lines.join("\n")}\n${ai}${review}\n\nRate daal ke publish karein:\n${reviewLink()}`,
         );
       } catch (err) {
         await sendText(m.phoneNumberId, from, `❌ Design nahi ban paaye: ${err instanceof Error ? err.message : "error"}. Link se try karein: ${reviewLink()}`);

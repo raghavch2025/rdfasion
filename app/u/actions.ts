@@ -61,8 +61,25 @@ export async function finishUpload(
   }
 }
 
+// Try a batch again that failed (e.g. Claude timed out) or got stuck.
+export async function retryBatch(token: string | null, batchId: string): Promise<{ ok: true; summary: BatchSummary | null } | Fail> {
+  if (!(await canUpload(token))) return denied;
+  if (!/^[0-9a-f-]{36}$/.test(batchId)) return { ok: false, error: "batch" };
+  try {
+    const summary = await processBatch(batchId);
+    refresh();
+    return summary ? { ok: true, summary } : { ok: false, error: "Yeh upload abhi chal raha hai, thodi der baad dekhein" };
+  } catch (err) {
+    refresh();
+    return { ok: false, error: err instanceof Error ? err.message : "processing failed" };
+  }
+}
+
+// The link publishes new drafts only; rates of live designs change in /admin.
 export async function publish(token: string | null, productId: string, fields: PublishFields): Promise<{ ok: true } | Fail> {
   if (!(await canUpload(token))) return denied;
+  const { data: p } = await adminDb().from("products").select("status").eq("id", productId).maybeSingle();
+  if (p?.status !== "draft") return { ok: false, error: "Yeh design pehle se live hai" };
   const res = await publishDesign(productId, fields);
   refresh();
   if (!res.ok) {
@@ -118,9 +135,17 @@ export async function retry(token: string | null, productId: string, colorId: st
   return { ok: true };
 }
 
+// On the link, only colours of drafts and colours still waiting for a photo
+// can be removed; live colours are managed in /admin.
 export async function removeColour(token: string | null, productId: string, colorId: string): Promise<{ ok: true } | Fail> {
   if (!(await canUpload(token))) return denied;
   const db = adminDb();
+  const [{ data: p }, { data: c }] = await Promise.all([
+    db.from("products").select("status").eq("id", productId).maybeSingle(),
+    db.from("product_colors").select("status").eq("id", colorId).eq("product_id", productId).maybeSingle(),
+  ]);
+  if (!p || !c) return { ok: false, error: "colour" };
+  if (p.status !== "draft" && c.status !== "pending") return { ok: false, error: "Live colour /admin se hatayein" };
   const { count } = await db.from("order_items").select("id", { count: "exact", head: true }).eq("color_id", colorId);
   if (count) {
     // Ordered before: hide it instead of deleting.

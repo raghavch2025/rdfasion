@@ -1,6 +1,6 @@
 import "server-only";
 import { adminDb } from "./supabase/admin.ts";
-import { recentBatches, reviewQueue, type BatchSummary } from "./autocatalog.ts";
+import { recentBatches, reviewQueue, STUCK_PROCESSING_MS, type BatchSummary } from "./autocatalog.ts";
 import { signedOriginals } from "./storage.ts";
 import { catalogImageUrl } from "./image-url.ts";
 import { baseModelPath, falConfigured } from "./generation.ts";
@@ -30,7 +30,18 @@ export type DesignCard = {
   flatlayUrl: string | null;
   colours: ColourCard[];
 };
-export type BatchCard = { id: string; source: string; status: string; photos: number; createdAt: string; summary: BatchSummary | null; error: string | null };
+export type BatchCard = {
+  id: string;
+  source: string;
+  status: string;
+  photos: number;
+  createdAt: string;
+  summary: BatchSummary | null;
+  error: string | null;
+  // Failed, or stuck in "processing" (the function ran out of time), with
+  // photos not yet made into designs: can be run again.
+  retryable: boolean;
+};
 export type DeskData = { designs: DesignCard[]; batches: BatchCard[]; aiReady: boolean; autofillReady: boolean };
 
 const SIZE_ORDER = ["XS", "S", "M", "L", "XL", "XXL", "3XL", "4XL"];
@@ -93,15 +104,21 @@ export async function loadDesk(): Promise<DeskData> {
 
   return {
     designs,
-    batches: batches.map((b) => ({
-      id: b.id,
-      source: b.source,
-      status: b.status,
-      photos: (b.upload_items as unknown as { count: number }[])?.[0]?.count ?? 0,
-      createdAt: b.created_at,
-      summary: (b.summary && Object.keys(b.summary).length ? b.summary : null) as BatchSummary | null,
-      error: b.error,
-    })),
+    batches: batches.map((b) => {
+      const count = (v: unknown) => (v as { count: number }[] | null)?.[0]?.count ?? 0;
+      const photos = count(b.photos);
+      const stuck = b.status === "processing" && Date.now() - new Date(b.last_item_at).getTime() > STUCK_PROCESSING_MS;
+      return {
+        id: b.id,
+        source: b.source,
+        status: b.status,
+        photos,
+        createdAt: b.created_at,
+        summary: (b.summary && Object.keys(b.summary).length ? b.summary : null) as BatchSummary | null,
+        error: b.error,
+        retryable: count(b.pending) > 0 && (b.status === "failed" || stuck),
+      };
+    }),
     aiReady: falConfigured() && Boolean(aiModel),
     autofillReady: Boolean(process.env.ANTHROPIC_API_KEY),
   };
