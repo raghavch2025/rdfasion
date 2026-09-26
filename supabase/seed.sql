@@ -15,6 +15,11 @@ insert into public.settings (key, value) values
   -- 10-digit numbers allowed to sign in to /admin.
   -- TODO: add Raghav's number before going live.
   ('admin_phones', '["9313877748", "9643195625"]'),
+  -- Only these numbers may change the WhatsApp number and the admin list
+  -- (PRD: "Raghav only"). TODO: put Raghav's number here.
+  ('owner_phones', '[]'),
+  -- Base-model photos for try-on, paths in the catalog bucket (models/).
+  ('base_models', '[]'),
   ('colour_palette', '[
      {"name": "Black",        "hex": "#111111"},
      {"name": "White",        "hex": "#FFFFFF"},
