@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHmac } from "node:crypto";
-import { parsePrice } from "./parse.ts";
+import { isIssuedUploadPath, parsePrice } from "./parse.ts";
 import { parseWebhook, validSignature } from "./whatsapp-parse.ts";
 import { searchCities } from "./cities.ts";
 
@@ -63,4 +63,13 @@ test("city search matches English and Hindi", () => {
   assert.ok(searchCities("पटना").some((c) => c.en === "Patna"));
   assert.ok(searchCities("pat").map((c) => c.en).includes("Patiala"));
   assert.deepEqual(searchCities(""), []);
+});
+
+test("only server-issued upload paths are accepted", () => {
+  const b = "3f2a9c1e-5b7d-4e8a-9c21-7d4e5f6a8b90";
+  assert.equal(isIssuedUploadPath(`uploads/${b}/01-ab12cd.jpg`, b), true);
+  assert.equal(isIssuedUploadPath(`uploads/${b}/../../../auth/v1/admin/users`, b), false);
+  assert.equal(isIssuedUploadPath(`uploads/${b}/01-ab12cd.jpg/../../x`, b), false);
+  assert.equal(isIssuedUploadPath(`uploads/${b}/01-ab12cd.jpg`, "not-a-uuid"), false);
+  assert.equal(isIssuedUploadPath(`uploads/other/01-ab12cd.jpg`, b), false);
 });

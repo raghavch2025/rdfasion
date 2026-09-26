@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
 import { SITE_URL, SUPABASE_ANON_KEY, SUPABASE_URL, serverEnv } from "@/lib/env";
+import { uploadTokenStatus } from "@/lib/upload-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -9,6 +10,7 @@ export const dynamic = "force-dynamic";
 export async function GET() {
   const secret = serverEnv("SUPABASE_SECRET_KEY");
   const settings = {
+    deployed_commit: (process.env.VERCEL_GIT_COMMIT_SHA ?? "local").slice(0, 7),
     supabase_url: Boolean(SUPABASE_URL),
     publishable_or_anon_key: Boolean(SUPABASE_ANON_KEY),
     secret_or_service_role_key: Boolean(secret),
@@ -16,7 +18,7 @@ export async function GET() {
     fal_key: Boolean(serverEnv("FAL_KEY")),
     anthropic_key: Boolean(serverEnv("ANTHROPIC_API_KEY")),
     push_keys: Boolean(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY && serverEnv("VAPID_PRIVATE_KEY")),
-    upload_link: (process.env.UPLOAD_TOKEN ?? "").length >= 16,
+    upload_link: uploadTokenStatus(),
     whatsapp_uploads: Boolean(process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_APP_SECRET && process.env.WHATSAPP_VERIFY_TOKEN),
   };
   const check = async (key: string | undefined, table: string) => {

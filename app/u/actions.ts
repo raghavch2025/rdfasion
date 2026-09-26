@@ -1,7 +1,7 @@
 "use server";
 import { revalidatePath } from "next/cache";
 import { adminDb } from "@/lib/supabase/admin";
-import { canUpload } from "@/lib/upload-auth";
+import { canUpload, isIssuedUploadPath } from "@/lib/upload-auth";
 import { addItems, createBatch, MAX_BATCH_PHOTOS, processBatch, type BatchSummary } from "@/lib/autocatalog";
 import { advanceJobs, falConfigured, baseModelPath, retryColour, startGeneration } from "@/lib/generation";
 import { applyOriginal, approveCandidate, publishDesign, revalidateCatalogue, type PublishFields } from "@/lib/catalog-admin";
@@ -45,7 +45,7 @@ export async function finishUpload(
 ): Promise<{ ok: true; summary: BatchSummary | null } | Fail> {
   if (!(await canUpload(token))) return denied;
   if (!/^[0-9a-f-]{36}$/.test(batchId)) return { ok: false, error: "batch" };
-  const mine = paths.filter((p) => p.startsWith(`uploads/${batchId}/`)).slice(0, MAX_BATCH_PHOTOS);
+  const mine = [...new Set(paths)].filter((p) => typeof p === "string" && isIssuedUploadPath(p, batchId)).slice(0, MAX_BATCH_PHOTOS);
   if (!mine.length) return { ok: false, error: "Koi photo upload nahi hui" };
   if (priceHint && Number.isInteger(priceHint) && priceHint >= 20 && priceHint <= 50000) {
     await adminDb().from("upload_batches").update({ price_hint: priceHint }).eq("id", batchId);

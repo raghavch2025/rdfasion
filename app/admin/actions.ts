@@ -87,7 +87,7 @@ export async function createDraft(): Promise<{ id: string }> {
 
 export async function analysePhoto(productId: string, path: string): Promise<GarmentGuess | null> {
   await requireAdmin();
-  if (!path.startsWith(`${productId}/`)) return null;
+  if (!/^[0-9a-f-]{36}$/.test(productId) || !new RegExp(`^${productId}/[a-z0-9-]+\\.jpg$`).test(path)) return null;
   const [url, palette] = await Promise.all([signedOriginal(path, 600), getPalette()]);
   if (!url) return null;
   return analyseGarment(url, palette.map((p) => p.name));
@@ -134,7 +134,8 @@ export async function saveDesign(productId: string, d: DesignDetails, mode: "ai"
   if (sizes.length === 0) return { ok: false, error: "Sizes chunein" };
   const colours = d.colours.filter((c) => c.name.trim());
   if (colours.length === 0) return { ok: false, error: "Colour chunein" };
-  const ownPath = (p?: string | null) => (p && p.startsWith(`${productId}/`) ? p : null);
+  // Only paths of the form "<productId>/<name>.jpg" (as uploaded by /admin/new).
+  const ownPath = (p?: string | null) => (p && /^[0-9a-f-]{36}$/.test(productId) && new RegExp(`^${productId}/[a-z0-9-]+\\.jpg$`).test(p) ? p : null);
   if (!ownPath(d.originalPath)) return { ok: false, error: "Photo" };
 
   const slug = await uniqueSlug(name, productId);

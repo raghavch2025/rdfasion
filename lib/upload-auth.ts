@@ -5,8 +5,18 @@ import { getAdmin } from "./auth.ts";
 // The private upload link is /u/<UPLOAD_TOKEN>: whoever has it can add and
 // publish designs (nothing else: no orders, no settings). It works only when
 // UPLOAD_TOKEN is set to 16 or more characters; change it to revoke the link.
+// The value as saved in Vercel, forgiving stray spaces, quotes or <>.
+export function uploadToken(): string {
+  return (process.env.UPLOAD_TOKEN ?? "").trim().replace(/^["'<]+|["'>]+$/g, "").trim();
+}
+
+export function uploadTokenStatus(): "ok" | "missing" | "too short" {
+  const t = uploadToken();
+  return !t ? "missing" : t.length < 16 ? "too short" : "ok";
+}
+
 export function uploadTokenOk(token: string | null | undefined): boolean {
-  const want = process.env.UPLOAD_TOKEN ?? "";
+  const want = uploadToken();
   if (want.length < 16 || !token) return false;
   const a = Buffer.from(want);
   const b = Buffer.from(token);
@@ -20,6 +30,8 @@ export async function canUpload(token: string | null | undefined): Promise<boole
 }
 
 export function uploadLinkPath(): string | null {
-  const t = process.env.UPLOAD_TOKEN ?? "";
+  const t = uploadToken();
   return t.length >= 16 ? `/u/${t}` : null;
 }
+
+export { isIssuedUploadPath } from "./parse.ts";
