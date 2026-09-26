@@ -42,11 +42,13 @@ export function Catalogue({ items, callNumber }: { items: CatalogueItem[]; callN
     ["tshirt", t.filterTshirt],
     ["lower", t.filterLower],
     ["cargo", t.filterCargo],
+    ["jacket", t.filterJacket],
     ["new", t.filterNew],
   ];
 
   return (
     <main className="mx-auto max-w-xl">
+      <p className="mx-3 mt-3 rounded-lg bg-accent px-3 py-2 text-center text-sm font-bold text-white">{t.wholesaleOnly}</p>
       <div className="flex gap-2 overflow-x-auto px-3 py-3">
         {chips.map(([key, label]) => (
           <button
@@ -85,7 +87,8 @@ export function Catalogue({ items, callNumber }: { items: CatalogueItem[]; callN
                   </span>
                 </div>
                 <p className="mt-1.5 line-clamp-2 leading-snug font-semibold">{p.name}</p>
-                <p className="text-lg font-extrabold">
+                <p className="text-xs font-bold tracking-wide text-muted uppercase">{t.wholesaleRate}</p>
+                <p className="text-lg leading-tight font-extrabold">
                   {rupees(p.price)} <span className="text-sm font-normal text-muted">{t.perPiece}</span>
                 </p>
                 <div className="mt-1 flex gap-1" aria-hidden>

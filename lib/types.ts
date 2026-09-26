@@ -1,8 +1,8 @@
-export type Category = "tshirt" | "lower" | "cargo";
+export type Category = "tshirt" | "lower" | "cargo" | "jacket";
 export type ProductStatus = "draft" | "live" | "hidden" | "sold_out";
 export type OrderStatus = "new" | "contacted" | "confirmed" | "dispatched" | "cancelled";
 export const ORDER_STATUSES: OrderStatus[] = ["new", "contacted", "confirmed", "dispatched", "cancelled"];
-export const CATEGORIES: Category[] = ["tshirt", "lower", "cargo"];
+export const CATEGORIES: Category[] = ["tshirt", "lower", "cargo", "jacket"];
 
 export type ProductColor = {
   id: string;
@@ -44,6 +44,7 @@ export type PublicSettings = {
   address: string;
   hours: string | null;
   rating: string | null;
+  popular_cities?: string[];
 };
 
 export type PaletteColour = { name: string; hex: string };

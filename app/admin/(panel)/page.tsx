@@ -72,10 +72,10 @@ export default async function Inbox({ searchParams }: { searchParams: Promise<{ 
               <Link href={`/admin/orders/${o.code}`} className="flex items-center gap-3 px-3 py-3">
                 <div className="min-w-0 flex-1">
                   <p className="font-bold">
-                    {o.code} · {o.buyer?.shop_name}
+                    {o.code} · {o.buyer?.shop_name || o.buyer?.name || o.buyer?.city}
                   </p>
                   <p className="truncate text-sm text-muted">
-                    {o.buyer?.name}, {o.buyer?.city} · {o.source} · {timeAgo(o.created_at)}
+                    {[o.buyer?.name, o.buyer?.city].filter(Boolean).join(", ")} · {o.source} · {timeAgo(o.created_at)}
                   </p>
                 </div>
                 <div className="text-right">

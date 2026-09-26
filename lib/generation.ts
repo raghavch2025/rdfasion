@@ -19,8 +19,10 @@ const MAX_ATTEMPTS = 3;
 const STUCK_MS = 20 * 60 * 1000;
 
 type Step = "recolour" | "tryon";
+type PhotoType = "model" | "flat-lay" | "auto";
 type JobPayload = {
   garment_path: string;
+  photo_type?: PhotoType;
   colour_name: string;
   category: Category;
   endpoint?: string;
@@ -46,7 +48,14 @@ export function falConfigured(): boolean {
 
 let falClient: FalClient | null = null;
 function fal(): FalClient {
-  if (!falClient) falClient = createFalClient({ credentials: serverEnv("FAL_KEY") });
+  if (!falClient) {
+    // FAL_TEST_PROXY_URL exists only so tests can stand in for fal.ai locally.
+    const testProxy = process.env.FAL_TEST_PROXY_URL;
+    falClient = createFalClient({
+      credentials: serverEnv("FAL_KEY"),
+      ...(testProxy ? { proxyUrl: { url: testProxy, when: "always" as const } } : {}),
+    });
+  }
   return falClient;
 }
 
@@ -72,12 +81,16 @@ export async function baseModelPath(): Promise<string | null> {
 
 const randomSeed = () => Math.floor(Math.random() * 2 ** 31);
 
-// Queue generation for every colour of a design (or the ones given).
-export async function startGeneration(productId: string, colorIds?: string[]): Promise<void> {
+// Queue generation for every colour of a design (or the ones given). Every
+// image is made on the same base model (the first photo in settings
+// base_models), so the whole catalogue shows one model. photoTypes tells
+// try-on whether a colour's photo already shows a person ("model") or the
+// garment alone ("flat-lay"); a photo on another model is re-dressed onto ours.
+export async function startGeneration(productId: string, colorIds?: string[], photoTypes: Record<string, PhotoType> = {}): Promise<void> {
   const db = adminDb();
   const { data: product } = await db
     .from("products")
-    .select("id, category, product_colors (id, color_name, status)")
+    .select("id, category, product_colors (id, color_name, status, approved_image_path)")
     .eq("id", productId)
     .single();
   if (!product) throw new Error("product not found");
@@ -87,26 +100,36 @@ export async function startGeneration(productId: string, colorIds?: string[]): P
     .eq("product_id", productId)
     .eq("kind", "original")
     .order("created_at", { ascending: false });
-  const productOriginal = originals?.find((o) => o.color_id === null)?.storage_path ?? originals?.[0]?.storage_path;
-  if (!productOriginal) throw new Error("no original photo");
+  const productOriginal = originals?.find((o) => o.color_id === null)?.storage_path ?? null;
 
-  const colours = (product.product_colors as { id: string; color_name: string }[]).filter(
+  const colours = (product.product_colors as { id: string; color_name: string; approved_image_path: string | null }[]).filter(
     (c) => !colorIds || colorIds.includes(c.id),
   );
-  const jobs = colours.map((c) => {
-    const own = originals?.find((o) => o.color_id === c.id)?.storage_path;
-    return {
-      product_id: productId,
-      color_id: c.id,
-      step: (own ? "tryon" : "recolour") as Step,
-      status: "queued",
-      payload: {
-        garment_path: own ?? productOriginal,
-        colour_name: c.color_name,
-        category: product.category as Category,
-      } satisfies JobPayload,
-    };
+  const jobs = colours.flatMap((c) => {
+    // A photo of this very colour goes straight to try-on. Without one, the
+    // colour's current catalogue photo is used; failing that, the design's
+    // main photo is recoloured first.
+    const own =
+      originals?.find((o) => o.color_id === c.id)?.storage_path ??
+      (c.approved_image_path ? (c.approved_image_path.startsWith("/") ? c.approved_image_path : `catalog:${c.approved_image_path}`) : null);
+    const garment = own ?? productOriginal;
+    if (!garment) return [];
+    return [
+      {
+        product_id: productId,
+        color_id: c.id,
+        step: (own ? "tryon" : "recolour") as Step,
+        status: "queued",
+        payload: {
+          garment_path: garment,
+          colour_name: c.color_name,
+          category: product.category as Category,
+          photo_type: photoTypes[c.id] ?? "auto",
+        } satisfies JobPayload,
+      },
+    ];
   });
+  if (jobs.length === 0) throw new Error("no photo to generate from");
   if (jobs.length === 0) return;
   await db.from("generation_jobs").insert(jobs);
   await advanceJobs(productId);
@@ -145,6 +168,7 @@ export async function retryColour(productId: string, colorId: string): Promise<v
       garment_path: payload.garment_path,
       colour_name: payload.colour_name,
       category: payload.category,
+      photo_type: payload.photo_type,
       endpoint: (count ?? 0) >= 2 ? TRYON_FALLBACK : TRYON,
     } satisfies JobPayload,
   });
@@ -152,11 +176,20 @@ export async function retryColour(productId: string, colorId: string): Promise<v
 }
 
 function tryonCategory(c: Category): string {
-  return c === "tshirt" ? "tops" : "bottoms";
+  return c === "tshirt" || c === "jacket" ? "tops" : "bottoms";
+}
+
+// Garment photos live in three places: the private originals bucket (uploads),
+// the public catalog bucket ("catalog:" prefix) or the site's own public/
+// folder (paths starting with "/", e.g. the first designs in public/seed).
+export async function garmentUrl(path: string): Promise<string | null> {
+  if (path.startsWith("/")) return `${SITE_URL}${path}`;
+  if (path.startsWith("catalog:")) return catalogPublicUrl(path.slice("catalog:".length));
+  return signedOriginal(path);
 }
 
 async function buildInput(job: Job, endpoint: string, seed: number, modelPath: string | null) {
-  const garment = await signedOriginal(job.payload.garment_path);
+  const garment = await garmentUrl(job.payload.garment_path);
   if (!garment) throw new Error("garment photo missing");
   if (endpoint === RECOLOUR) {
     return {
@@ -167,13 +200,13 @@ async function buildInput(job: Job, endpoint: string, seed: number, modelPath: s
     };
   }
   if (!modelPath) throw new Error("no base model photo in settings");
-  const model = catalogPublicUrl(modelPath);
+  const model = modelPath.startsWith("/") ? `${SITE_URL}${modelPath}` : catalogPublicUrl(modelPath);
   if (endpoint === TRYON_FALLBACK) return { human_image_url: model, garment_image_url: garment };
   return {
     model_image: model,
     garment_image: garment,
     category: tryonCategory(job.payload.category),
-    garment_photo_type: "auto",
+    garment_photo_type: job.payload.photo_type ?? "auto",
     mode: "quality",
     seed,
     num_samples: 1,
@@ -270,7 +303,8 @@ async function complete(job: Job, output: unknown): Promise<void> {
           color_id: job.color_id,
           step: "tryon",
           status: "queued",
-          payload: { garment_path: path, colour_name: job.payload.colour_name, category: job.payload.category },
+          // The recoloured garment is a flat product photo.
+          payload: { garment_path: path, colour_name: job.payload.colour_name, category: job.payload.category, photo_type: "flat-lay" },
         })
         .select("*")
         .single();

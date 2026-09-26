@@ -6,6 +6,7 @@ import { isValidPhone, normalizePhone, rupees } from "@/lib/format";
 import { buildOrderMessage, waUrl } from "@/lib/whatsapp";
 import { Button, ButtonLink, Field, inputClass } from "@/components/ui/Button";
 import { BottomBar } from "./BottomBar";
+import { CityPicker } from "./CityPicker";
 import { setCart, useCart } from "./cart-store";
 import { useT } from "./LangProvider";
 import { readJson, writeJson } from "./storage";
@@ -18,7 +19,15 @@ type Result =
 
 const EMPTY: Buyer = { name: "", shop_name: "", city: "", phone: "" };
 
-export function CheckoutView({ callNumber, whatsappNumber }: { callNumber: string; whatsappNumber: string }) {
+export function CheckoutView({
+  callNumber,
+  whatsappNumber,
+  popularCities,
+}: {
+  callNumber: string;
+  whatsappNumber: string;
+  popularCities: string[];
+}) {
   const { t } = useT();
   const lines = useCart();
   const [buyer, setBuyer] = useState<Buyer>(EMPTY);
@@ -46,11 +55,10 @@ export function CheckoutView({ callNumber, whatsappNumber }: { callNumber: strin
   }
 
   function validate(b: Buyer) {
+    // Only the mobile number and city are required.
     const e: Partial<Record<keyof Buyer, string>> = {};
-    if (!b.name.trim()) e.name = t.required;
-    if (!b.shop_name.trim()) e.shop_name = t.required;
-    if (!b.city.trim()) e.city = t.required;
     if (!isValidPhone(b.phone)) e.phone = t.mobileInvalid;
+    if (!b.city.trim()) e.city = t.cityRequired;
     return e;
   }
 
@@ -124,19 +132,10 @@ export function CheckoutView({ callNumber, whatsappNumber }: { callNumber: strin
       <p className="mb-4 text-muted">
         {totals.pieces} pcs · {rupees(totals.amount)}
       </p>
-      <form id="checkout" onSubmit={submit} className="space-y-4" noValidate>
-        <Field label={t.name} error={errors.name}>
-          <input className={inputClass} value={buyer.name} onChange={set("name")} autoComplete="name" maxLength={80} />
-        </Field>
-        <Field label={t.shop} error={errors.shop_name}>
-          <input className={inputClass} value={buyer.shop_name} onChange={set("shop_name")} autoComplete="organization" maxLength={80} />
-        </Field>
-        <Field label={t.city} error={errors.city}>
-          <input className={inputClass} value={buyer.city} onChange={set("city")} autoComplete="address-level2" maxLength={60} />
-        </Field>
+      <form id="checkout" onSubmit={submit} className="space-y-5" noValidate>
         <Field label={t.mobile} error={errors.phone} hint={t.mobileHint}>
           <input
-            className={inputClass}
+            className={`${inputClass} text-xl tracking-wider`}
             value={buyer.phone}
             onChange={set("phone")}
             type="tel"
@@ -144,6 +143,21 @@ export function CheckoutView({ callNumber, whatsappNumber }: { callNumber: strin
             autoComplete="tel-national"
             maxLength={14}
           />
+        </Field>
+        <CityPicker
+          value={buyer.city}
+          onChange={(city) => {
+            setBuyer((b) => ({ ...b, city }));
+            setErrors((e) => ({ ...e, city: undefined }));
+          }}
+          popular={popularCities}
+          error={errors.city}
+        />
+        <Field label={`${t.name} (${t.optional})`}>
+          <input className={inputClass} value={buyer.name} onChange={set("name")} autoComplete="name" maxLength={80} />
+        </Field>
+        <Field label={`${t.shop} (${t.optional})`}>
+          <input className={inputClass} value={buyer.shop_name} onChange={set("shop_name")} autoComplete="organization" maxLength={80} />
         </Field>
       </form>
       <BottomBar callNumber={callNumber}>

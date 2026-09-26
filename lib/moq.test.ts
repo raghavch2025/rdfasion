@@ -49,7 +49,7 @@ test("WhatsApp message matches the PRD format", () => {
     ],
   });
   assert.equal(msg, [
-    "Order RD-1042 | RD Fashion",
+    "Wholesale Order RD-1042 | RD Fashion",
     "Dukaan: Sharma Garments, Rewari",
     "Naam: Rakesh Sharma | 9812345612",
     "",
@@ -62,5 +62,13 @@ test("WhatsApp message matches the PRD format", () => {
     "Order dekhein: rdfashion.in/o/RD-1042",
   ].join("\n"));
   assert.ok(msg.length < 1000);
-  assert.ok(waUrl("919313877748", msg).startsWith("https://wa.me/919313877748?text=Order%20RD-1042"));
+  assert.ok(waUrl("919313877748", msg).startsWith("https://wa.me/919313877748?text=Wholesale%20Order%20RD-1042"));
+});
+
+test("message without name and shop name (both optional)", () => {
+  const msg = buildOrderMessage({
+    code: "RD-1043", shopName: "", city: "Rohtak", name: "  ", phone: "9812345612", siteHost: "rdfashion.in",
+    lines: [{ name: "Raglan full sleeve tee", colorName: "Grey / Black", pricePerPiece: 300, sizes: [["L", 6]] }],
+  });
+  assert.deepEqual(msg.split("\n").slice(0, 3), ["Wholesale Order RD-1043 | RD Fashion", "Sheher: Rohtak", "Mobile: 9812345612"]);
 });

@@ -22,8 +22,8 @@ export default async function OrderPage({ params }: { params: Promise<{ code: st
             createdAt: order.created_at,
             totalPieces: order.total_pieces,
             totalAmount: order.total_amount,
-            shop: `${order.buyer.shop_name}, ${order.buyer.city}`,
-            buyer: `${order.buyer.name} · ${maskPhone(order.buyer.phone)}`,
+            shop: [order.buyer.shop_name, order.buyer.city].filter(Boolean).join(", "),
+            buyer: [order.buyer.name, maskPhone(order.buyer.phone)].filter(Boolean).join(" · "),
             lines: order.lines,
           }
         }

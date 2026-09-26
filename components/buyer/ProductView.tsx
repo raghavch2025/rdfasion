@@ -68,7 +68,8 @@ export function ProductView({ product, callNumber }: { product: ProductWithColor
       <div className="space-y-4 px-4 pt-3">
         <div>
           <h1 className="text-xl leading-tight font-extrabold">{product.name}</h1>
-          <p className="mt-1 text-2xl font-extrabold">
+          <p className="mt-2 text-xs font-bold tracking-wide text-muted uppercase">{t.wholesaleRate}</p>
+          <p className="text-2xl font-extrabold">
             {rupees(product.price_per_piece)} <span className="text-base font-normal text-muted">{t.perPiece}</span>
           </p>
           <p className="text-sm font-semibold text-accent">{t.minTag(product.moq_pieces)}</p>

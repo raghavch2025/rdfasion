@@ -10,6 +10,7 @@ export default async function AdminLayout({ children }: { children: React.ReactN
   await requireAdmin();
   const nav: [string, string][] = [
     ["/admin", s.nav.orders],
+    ["/admin/upload", s.nav.upload],
     ["/admin/new", s.nav.new],
     ["/admin/products", s.nav.products],
     ["/admin/stats", s.nav.stats],

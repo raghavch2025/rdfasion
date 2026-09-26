@@ -10,7 +10,9 @@ insert into public.settings (key, value) values
      'second_number', '9643195625',
      'address', '16/152, Upper Ground Floor, Madan Complex, Main Tank Road, Karol Bagh, Delhi 110005',
      'hours', null,
-     'rating', null)),
+     'rating', null,
+     'popular_cities', jsonb_build_array('Delhi', 'Gurugram', 'Faridabad', 'Noida', 'Ghaziabad', 'Meerut',
+                                         'Sonipat', 'Panipat', 'Rohtak', 'Rewari', 'Karnal', 'Hisar'))),
   -- 10-digit numbers allowed to sign in to /admin.
   -- TODO: add Raghav's number before going live.
   ('admin_phones', '["9313877748", "9643195625"]'),
@@ -18,7 +20,7 @@ insert into public.settings (key, value) values
   -- (PRD: "Raghav only"). TODO: put Raghav's number here.
   ('owner_phones', '[]'),
   -- Base-model photos for try-on, paths in the catalog bucket (models/).
-  ('base_models', '[]'),
+  ('base_models', '["/seed/raglan-tee-white-blue.webp"]'),
   ('colour_palette', '[
      {"name": "Black",        "hex": "#111111"},
      {"name": "White",        "hex": "#FFFFFF"},
@@ -34,7 +36,8 @@ insert into public.settings (key, value) values
   ('size_sets', '{
      "tshirt": ["M", "L", "XL", "XXL"],
      "lower":  ["M", "L", "XL", "XXL"],
-     "cargo":  ["M", "L", "XL", "XXL"]
+     "cargo":  ["M", "L", "XL", "XXL"],
+     "jacket": ["M", "L", "XL", "XXL"]
    }')
 on conflict (key) do update set value = excluded.value;
 

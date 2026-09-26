@@ -71,6 +71,26 @@ After the first deploy:
 
 Running the SQL by hand instead (Supabase SQL editor): paste each migration file whole (about 250 and 200 lines), click once in the editor so nothing is highlighted (the button must say **Run**, not **Run selected**), then run. The files are safe to run again, and `scripts/migrate.mjs` also finishes a half-done manual setup.
 
+## New designs from WhatsApp (Papa)
+
+Papa never needs to log in. Two ways in; both end in the same place.
+
+**1. Upload link** — `https://<site>/u/<UPLOAD_TOKEN>` (set `UPLOAD_TOKEN` in Vercel to 16+ random characters; admins see the link in `/admin/settings`).
+- Tap **Photos chunein**, pick the photos from WhatsApp or the gallery (all colours of a design, several designs at once), optionally type one rate, tap **Upload**.
+- Add it to the home screen once (Chrome menu → Add to Home screen). After that, in WhatsApp: select photos → Share → **RD Upload**. The photos go straight in. (Android + Chrome only; iPhone uses the button.)
+
+**2. WhatsApp number** — Papa sends the photos to the shop's WhatsApp Business number, optionally "rate 300", then **done**. He gets a reply listing the designs made and the link to publish. Setup (once):
+1. developers.facebook.com → create an app → add **WhatsApp**. The free test number works right away for up to 5 numbers: add Papa's and Bhaiya's numbers as recipients.
+2. WhatsApp → Configuration → Callback URL `https://<site>/api/whatsapp`, Verify token = your `WHATSAPP_VERIFY_TOKEN` → Verify and save → Webhook fields → subscribe **messages**.
+3. Business Settings → System users → create one, give it the app and the WhatsApp account, generate a token that **never expires** with `whatsapp_business_messaging` → `WHATSAPP_TOKEN`. (The token on the API Setup page dies within 24 hours.)
+4. App settings → Basic → App secret → `WHATSAPP_APP_SECRET`. Switch the app to **Live** mode.
+5. Only numbers in `admin_phones` / `owner_phones` are accepted.
+
+**What happens to the photos**
+- Claude (`ANTHROPIC_API_KEY`) looks at the new photos next to the current catalogue: the same design in different colours becomes one design with colour options; a new colour of an existing design is added to it; different designs become separate drafts. Without the key, each photo becomes its own draft to rename.
+- **One model everywhere:** with `FAL_KEY` set, every photo is redone by virtual try-on on the same base model (the first photo under Base model in `/admin/settings`; by default the model already in the shop's catalogue photos). That includes photos that already show a different model, so the whole catalogue looks like one shoot. Without `FAL_KEY` the shop's photos are used as they are. A single photo showing many colours (flat-lay) cannot go through try-on; upload one photo per colour to get model images for it.
+- On the upload link Papa checks each colour's photo (**Theek hai** / **Asli photo** / **Dobara AI**), types the **wholesale rate**, minimum pieces and sizes, and taps **Publish**. Designs already listed with shop photos get an **AI model photo banayein** button once AI is set up.
+
 ## How orders stay safe
 
 - `place_order` (Postgres function, service role only) re-checks availability, sizes, sold-out flags and the 6-piece MOQ, copies prices, upserts the buyer by phone and writes order + items in one transaction. It also enforces 10 orders per phone per hour.
@@ -80,7 +100,7 @@ Running the SQL by hand instead (Supabase SQL editor): paste each migration file
 
 ## Test results (local Supabase stack, Chromium at 360 px, Instagram in-app user agent)
 
-All PRD acceptance tests that can run without a real phone passed (35 checks), including:
+All PRD acceptance tests that can run without a real phone passed, including:
 - catalogue loads in the Instagram UA with no horizontal scroll
 - Add to cart blocked at 5 pieces, allowed at 6
 - 9-digit mobile rejected; 10 digits saves and opens `wa.me/919313877748` with the exact PRD message

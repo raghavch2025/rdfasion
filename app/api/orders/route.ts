@@ -34,7 +34,8 @@ export async function POST(req: Request) {
     city: str(body.buyer?.city, 60),
     phone,
   };
-  if (!buyer.name || !buyer.shop_name || !buyer.city || !isValidPhone(phone)) {
+  // Name and shop name are optional; mobile and city are required.
+  if (!buyer.city || !isValidPhone(phone)) {
     return NextResponse.json({ error: "invalid_buyer" }, { status: 400 });
   }
   if (!Array.isArray(body.lines) || body.lines.length === 0 || body.lines.length > 50) {
@@ -92,7 +93,7 @@ export async function POST(req: Request) {
 
   after(async () => {
     await db.from("events").insert({ name: "order_saved", source, ref: utm.r ?? null, order_code: order.code });
-    await notifyAdminsOfOrder({ code: order.code, shop: `${buyer.shop_name}, ${buyer.city}`, pieces: order.total_pieces, amount: order.total_amount });
+    await notifyAdminsOfOrder({ code: order.code, shop: [buyer.shop_name || buyer.name, buyer.city].filter(Boolean).join(", "), pieces: order.total_pieces, amount: order.total_amount });
   });
 
   return NextResponse.json({

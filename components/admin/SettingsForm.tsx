@@ -7,6 +7,7 @@ import { Button, Field, inputClass } from "@/components/ui/Button";
 import { CATEGORIES, type PaletteColour, type PublicSettings } from "@/lib/types";
 import { admin as s } from "@/strings";
 import { resizeImage } from "./resize";
+import { catalogImageUrl } from "@/lib/image-url";
 
 type Props = {
   isOwner: boolean;
@@ -24,6 +25,7 @@ export function SettingsForm(props: Props) {
   const [pending, start] = useTransition();
   const [msg, setMsg] = useState<string | null>(null);
   const [shop, setShop] = useState(props.shop);
+  const [cities, setCities] = useState((props.shop.popular_cities ?? []).join(", "));
   const [palette, setPalette] = useState(props.palette);
   const [sizeSets, setSizeSets] = useState(
     Object.fromEntries(CATEGORIES.map((c) => [c, (props.sizeSets[c] ?? ["M", "L", "XL", "XXL"]).join(", ")])),
@@ -74,7 +76,22 @@ export function SettingsForm(props: Props) {
         {shopField("rating", "Google rating (e.g. 4.6 ★, 120 reviews)")}
         {shopField("whatsapp_number", `${s.whatsappNumber}: 91 + 10 digits`, !props.isOwner)}
         {!props.isOwner && <p className="text-sm text-muted">{s.ownerOnly}</p>}
-        <Button disabled={pending} onClick={() => save("public", shop)}>
+        <Field label={s.popularCities}>
+          <input className={inputClass} value={cities} onChange={(e) => setCities(e.target.value)} />
+        </Field>
+        <Button
+          disabled={pending}
+          onClick={() =>
+            save("public", {
+              ...shop,
+              popular_cities: cities
+                .split(",")
+                .map((c) => c.trim())
+                .filter(Boolean)
+                .slice(0, 24),
+            })
+          }
+        >
           {s.save}
         </Button>
       </section>
@@ -131,12 +148,12 @@ export function SettingsForm(props: Props) {
 
       <section className="space-y-3">
         <h2 className="font-bold">{s.baseModels}</h2>
-        <p className="text-sm text-muted">Two poses (front, three-quarter), plain studio background. The first one is used for try-on.</p>
+        <p className="text-sm text-muted">Every AI image puts the garment on the first photo here, so all designs show the same model. Use a front-facing, full-length photo on a plain background.</p>
         <div className="grid grid-cols-3 gap-2">
           {props.baseModels.map((m, i) => (
             <div key={m} className="relative">
               {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={props.catalogBase + m} alt="" className="aspect-[2/3] w-full rounded bg-soft object-cover" />
+              <img src={catalogImageUrl(m)} alt="" className="aspect-[2/3] w-full rounded bg-soft object-cover" />
               <button
                 className="absolute top-1 right-1 min-h-8 rounded bg-white px-2 text-xs"
                 onClick={() => save("base_models", props.baseModels.filter((_, k) => k !== i))}

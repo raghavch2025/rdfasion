@@ -27,7 +27,8 @@ export function CartView({ callNumber }: { callNumber: string }) {
 
   return (
     <main className="mx-auto max-w-xl px-3 pt-3">
-      <h1 className="mb-3 text-xl font-extrabold">{t.cart}</h1>
+      <h1 className="text-xl font-extrabold">{t.wholesaleOrder}</h1>
+      <p className="mb-3 text-sm text-muted">{t.wholesaleOnly}</p>
       <ul className="space-y-3">
         {lines.map((line) => {
           const p = linePieces(line);

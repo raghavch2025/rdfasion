@@ -401,7 +401,10 @@ export async function saveSetting(key: string, value: unknown): Promise<Result> 
     if (!admin.isOwner && v.whatsapp_number !== current.whatsapp_number) return { ok: false, error: "owner only" };
     const wa = String(v.whatsapp_number ?? "").replace(/\D/g, "");
     if (!/^91[6-9]\d{9}$/.test(wa)) return { ok: false, error: "WhatsApp number: 91 + 10 digits" };
-    value = { ...current, ...v, whatsapp_number: wa };
+    const cities = Array.isArray(v.popular_cities)
+      ? (v.popular_cities as unknown[]).filter((c): c is string => typeof c === "string").map((c) => c.trim().slice(0, 40)).filter(Boolean).slice(0, 24)
+      : current.popular_cities;
+    value = { ...current, ...v, whatsapp_number: wa, popular_cities: cities };
   } else if (key === "admin_phones" || key === "owner_phones") {
     if (!admin.isOwner) return { ok: false, error: "owner only" };
     const list = (value as string[]).map(normalizePhone).filter((p) => /^[6-9]\d{9}$/.test(p));

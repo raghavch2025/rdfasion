@@ -16,6 +16,8 @@ export async function GET() {
     fal_key: Boolean(serverEnv("FAL_KEY")),
     anthropic_key: Boolean(serverEnv("ANTHROPIC_API_KEY")),
     push_keys: Boolean(process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY && serverEnv("VAPID_PRIVATE_KEY")),
+    upload_link: (process.env.UPLOAD_TOKEN ?? "").length >= 16,
+    whatsapp_uploads: Boolean(process.env.WHATSAPP_TOKEN && process.env.WHATSAPP_APP_SECRET && process.env.WHATSAPP_VERIFY_TOKEN),
   };
   const check = async (key: string | undefined, table: string) => {
     if (!SUPABASE_URL || !key) return "missing settings";

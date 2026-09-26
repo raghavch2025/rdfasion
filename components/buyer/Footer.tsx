@@ -7,6 +7,7 @@ export function Footer({ settings }: { settings: PublicSettings }) {
   return (
     <footer className="mx-auto max-w-xl space-y-2 border-t border-line px-4 pt-6 pb-28 text-sm text-muted">
       <p className="font-semibold text-ink">{settings.shop_name}</p>
+      <p>{t.since}</p>
       <p>
         {t.address}: {settings.address}
       </p>

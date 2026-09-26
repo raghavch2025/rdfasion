@@ -18,9 +18,10 @@ export type MessageOrder = {
 
 export function buildOrderMessage(o: MessageOrder): string {
   const out: string[] = [];
-  out.push(o.code ? `Order ${o.code} | RD Fashion` : "Order | RD Fashion");
-  out.push(`Dukaan: ${o.shopName}, ${o.city}`);
-  out.push(`Naam: ${o.name} | ${o.phone}`);
+  out.push(o.code ? `Wholesale Order ${o.code} | RD Fashion` : "Wholesale Order | RD Fashion");
+  // Name and shop name are optional at checkout.
+  out.push(o.shopName.trim() ? `Dukaan: ${o.shopName.trim()}, ${o.city}` : `Sheher: ${o.city}`);
+  out.push(o.name.trim() ? `Naam: ${o.name.trim()} | ${o.phone}` : `Mobile: ${o.phone}`);
   out.push("");
   let totalPcs = 0;
   let totalAmt = 0;

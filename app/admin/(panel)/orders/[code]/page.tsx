@@ -11,7 +11,7 @@ export default async function AdminOrder({ params }: { params: Promise<{ code: s
   const order = await getOrderByCode(decodeURIComponent((await params).code).toUpperCase());
   if (!order) notFound();
   const b = order.buyer;
-  const greeting = `Namaste ${b.name} ji, RD Fashion se. Aapka order ${order.code} mila (${order.total_pieces} pcs, ${rupees(order.total_amount)}).`;
+  const greeting = `Namaste${b.name ? ` ${b.name}` : ""} ji, RD Fashion se. Aapka order ${order.code} mila (${order.total_pieces} pcs, ${rupees(order.total_amount)}).`;
   return (
     <div className="space-y-4">
       <Link href="/admin" className="text-sm underline">
@@ -28,10 +28,8 @@ export default async function AdminOrder({ params }: { params: Promise<{ code: s
         </p>
       </div>
       <section className="rounded-lg border border-line p-3">
-        <p className="text-lg font-bold">{b.shop_name}</p>
-        <p>
-          {b.name}, {b.city}
-        </p>
+        <p className="text-lg font-bold">{b.shop_name || b.name || b.city}</p>
+        <p>{[b.shop_name ? b.name : "", b.city].filter(Boolean).join(", ")}</p>
         <p className="text-muted">
           {b.phone} · {b.order_count} order{b.order_count === 1 ? "" : "s"}
         </p>
